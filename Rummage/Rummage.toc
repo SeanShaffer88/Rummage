@@ -1,0 +1,32 @@
+## Interface: 16001
+## Title: |cffd9a441Rummage|r
+## Notes: List-view bag & bank replacement: sortable columns, categories, search, alts, one-click upgrade equipping, junk selling, themes, and Auctionator/TSM/Pawn/CanIMogIt/Scrap support.
+## Author: Malikor
+## Version: 1.3.0
+## IconTexture: Interface\AddOns\Rummage\Media\Icon
+## SavedVariables: RummageDB
+## OptionalDeps: Scrap, Auctionator, TradeSkillMaster, Pawn, CanIMogIt, Syndicator, ElvUI, EllesmereUI, GW2_UI, Tukui, NDui, LibSharedMedia-3.0, LibDBIcon-1.0
+## X-License: GPL-3.0-or-later
+## X-Build: 1.60.1.70450
+## AddonCompartmentFunc: Rummage_OnAddonCompartmentClick
+## Category: Inventory
+
+Core.lua
+Compat.lua
+Data.lua
+Items.lua
+Search.lua
+Categories.lua
+Columns.lua
+Junk.lua
+Mover.lua
+Integrations.lua
+Tooltip.lua
+Upgrade.lua
+Widgets.lua
+UI.lua
+Hooks.lua
+Minimap.lua
+Options.lua
+Debug.lua
+Init.lua
