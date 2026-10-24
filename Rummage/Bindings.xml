@@ -1,0 +1,11 @@
+<Bindings>
+	<Binding name="RUMMAGE_TOGGLE" header="RUMMAGE" category="ADDONS">
+		Rummage.UI:Toggle("bags")
+	</Binding>
+	<Binding name="RUMMAGE_TOGGLE_BANK" category="ADDONS">
+		Rummage.UI:Toggle("bank")
+	</Binding>
+	<Binding name="RUMMAGE_SEARCH" category="ADDONS">
+		Rummage.UI:FocusSearch()
+	</Binding>
+</Bindings>
