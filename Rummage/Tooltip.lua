@@ -64,12 +64,16 @@ function Tooltip:Add(tt, link)
 		lines = BuildLines(id)
 		lineCache[id] = lines
 	end
-	if lines == NONE then return end
+	local hint = R.Extras and R.Extras:SellHint(link)
+	if lines == NONE and not hint then return end
 	tt:AddLine(" ")
-	for i = 1, #lines do
-		local l = lines[i]
-		tt:AddDoubleLine(l[1], l[2], 1, 1, 1, 0.65, 0.65, 0.65)
+	if lines ~= NONE then
+		for i = 1, #lines do
+			local l = lines[i]
+			tt:AddDoubleLine(l[1], l[2], 1, 1, 1, 0.65, 0.65, 0.65)
+		end
 	end
+	if hint then tt:AddLine(hint, 0.65, 0.85, 0.65) end
 	tt:Show()
 end
 

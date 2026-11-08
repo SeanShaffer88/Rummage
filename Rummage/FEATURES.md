@@ -1,6 +1,6 @@
 # Rummage — Features
 
-The full feature list for Rummage 1.5.0 for WoW Forever
+The full feature list for Rummage 1.6.0 for WoW Forever
 (Interface 16001). For the short version see `README.md`; for
 store-listing copy see `DESCRIPTION.md`.
 
@@ -141,6 +141,11 @@ Auctionator (price columns, `ah>` search), TradeSkillMaster (any
 custom price source, `tsm>` search), Pawn (upgrade arrow and %,
 `pawn>` search), Can I Mog It? (transmog status), Scrap (junk
 list), Syndicator (tooltip counts step aside).
+
+## New in 1.6.0
+
+Mail expiry warning (`/rum mail`), daily gold history (`/rum gold`), Auctionator
+vendor-or-AH tooltip hint, `/rum buyback all`, `/rum perf`, `/rum apicheck export`.
 
 ## New in 1.5.0
 

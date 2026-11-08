@@ -175,16 +175,23 @@ function Data:ScanMail()
 	if not GetInboxNumItems then return end
 	local mail = {}
 	local maxAttach = ATTACHMENTS_MAX_RECEIVE or 16
+	local now = time()
 	for i = 1, GetInboxNumItems() do
+		local daysLeft
+		if _G.GetInboxHeaderInfo then
+			local ok, _, _, _, _, _, _, d = pcall(_G.GetInboxHeaderInfo, i)
+			if ok and type(d) == "number" then daysLeft = d end
+		end
 		for a = 1, maxAttach do
 			local link = GetInboxItemLink(i, a)
 			if link then
 				local _, _, _, count = GetInboxItem(i, a)
-				mail[#mail + 1] = { l = link, c = count or 1, i = R.ItemID(link) }
+				mail[#mail + 1] = { l = link, c = count or 1, i = R.ItemID(link), d = daysLeft }
 			end
 		end
 	end
 	self.me.mail = mail
+	self.me.mailT = now
 	R:Fire("DATA_CHANGED")
 end
 

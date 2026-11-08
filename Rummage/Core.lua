@@ -193,7 +193,7 @@ R.L = {
 	tabGeneral = "General", tabAppearance = "Appearance", tabItems = "Items & Junk",
 	tabColumns = "Columns", tabCategories = "Categories", tabAbout = "About",
 	preset = "Preset",
-	slashUsage = "/rum [bank | search <text> | config | restack | sell | conflicts | keys | reset | upgrade (preview popup) | export | import <string> | apicheck | inventory [csv|text] | autoprofile | savesearch | junklog | buyback [n] | debug [report|reset]]",
+	slashUsage = "/rum [bank | search <text> | config | restack | sell | conflicts | keys | reset | upgrade (preview popup) | export | import <string> | apicheck [export] | gold | mail | perf | inventory [csv|text] | autoprofile | savesearch | junklog | buyback [n|all] | debug [report|reset]]",
 }
 do
 	local loc = (GetLocale and GetLocale()) or "enUS"
@@ -362,6 +362,9 @@ R.defaults = {
 	upgradeIlvlFallback = true, -- without Pawn, judge upgrades by item level
 	resetSearchOnOpen = true,
 	lowSpaceWarn = 3,
+	mailWarnDays = 3,       -- warn at login when cached mail expires within this many days (0 = off)
+	goldHistory = true,     -- keep a daily gold snapshot per character for /rum gold
+	sellHint = true,        -- tooltip hint: vendor or auction house (needs Auctionator)
 	tintUnusable = true,
 	gridItemLevel = true,
 	questBadges = true,
@@ -429,7 +432,7 @@ end
 
 local CLAMP = {
 	scale = { 0.5, 2 }, alpha = { 0.1, 1 }, fontSize = { 6, 24 }, rowHeight = { 14, 40 },
-	gridSize = { 20, 64 }, width = { 400, 3000 }, height = { 300, 2000 }, lowSpaceWarn = { 0, 40 },
+	gridSize = { 20, 64 }, width = { 400, 3000 }, height = { 300, 2000 }, lowSpaceWarn = { 0, 40 }, mailWarnDays = { 0, 28 },
 	upgradeDuration = { 0, 120 }, staleDays = { 0, 365 }, sellConfirmValue = { 0, 100000000 },
 }
 local ENUMS = {

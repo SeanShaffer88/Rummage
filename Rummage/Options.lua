@@ -130,6 +130,10 @@ builders.general = function(p)
 	local chk = W:Button(p, "Check for conflicts now", COL2 - 30, 20, function() R.Hooks:CheckConflicts(true) end)
 	st:Place(chk, 20, 6)
 	st:Slider("Low bag space warning at", "lowSpaceWarn", 0, 20, 1, function(v) return v == 0 and "off" or (v .. " free") end)
+	st:Slider("Mail expiry warning within", "mailWarnDays", 0, 28, 1, function(v) return v == 0 and "off" or (v .. " days") end)
+	st:Check("Keep daily gold history (/rum gold)", "goldHistory")
+	st:Check("Tooltip hint: vendor or auction house", "sellHint",
+		"Needs Auctionator. Shows whether a stack is worth more at the vendor or on the auction house.")
 	st:Check("Search all characters while searching", "searchAllChars",
 		"While the search box has text, results come from every character's cached bags (the 'All' button in the window header does the same). Results are view-only in this mode.")
 

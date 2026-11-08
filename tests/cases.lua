@@ -383,11 +383,79 @@ end)
 test("every documented slash command runs without errors", function()
   local env, R = boot()
   for _, cmd in ipairs({ "", "bank", "config", "search foo", "restack", "conflicts", "reset", "keys", "export", "apicheck",
-    "inventory text", "autoprofile", "autoprofile on", "autoprofile off", "savesearch", "junklog", "buyback", "debug report", "bogus" }) do
+    "inventory text", "autoprofile", "autoprofile on", "autoprofile off", "savesearch", "junklog", "buyback", "buyback all", "gold", "mail", "perf", "apicheck export", "debug report", "bogus" }) do
     env.SlashCmdList.RUMMAGE(cmd)
     env.__settle(2)
   end
   env.SlashCmdList.RUMMAGEDEBUG("report")
   assert(chatHas(env, "bank path:"), "bank path in /fdebug report")
+  assert(not env.__errors, "errors: " .. tostring(env.__errors and env.__errors[1]))
+end)
+
+test("mail expiry: stored days-left ages and warns inside the window", function()
+  local env, R = boot()
+  local me = R.Data.me
+  me.mailT = env.time() - 2 * 86400
+  me.mail = { { l = "a", c = 1, d = 3.5 }, { l = "b", c = 1, d = 20 }, { l = "c", c = 1 } }
+  local list = R.Extras:ExpiringMail(3)
+  assert(#list == 1 and list[1].items == 1, "expected one expiring item, got " .. #list)
+  assert(math.abs(list[1].days - 1.5) < 0.05, "days left should age to 1.5, got " .. tostring(list[1].days))
+  assert(#R.Extras:ExpiringMail(0.5) == 0, "nothing should expire within half a day")
+  R.settings.mailWarnDays = 3
+  assert(R.Extras:MailWarnings(false) == 1)
+  R.settings.mailWarnDays = 0
+  assert(R.Extras:MailWarnings(false) == 0, "warning off must stay silent")
+  assert(chatHas(env, "Mail on"), "warning text missing")
+end)
+
+test("gold history: one snapshot per day, deltas over 7 and 30 days", function()
+  local env, R = boot()
+  local me = R.Data.me
+  local today = math.floor(env.time() / 86400)
+  me.money = 500000
+  me.goldLog = { { d = today - 40, m = 100000 }, { d = today - 8, m = 300000 } }
+  env.GetMoney = function() return 500000 end
+  R.Extras:RecordGold()
+  R.Extras:RecordGold()
+  assert(#me.goldLog == 3 and me.goldLog[3].d == today, "same-day snapshots must merge")
+  local rows = R.Extras:GoldReport()
+  assert(#rows >= 2 and rows[#rows]:find("All characters", 1, true), "total row missing")
+  assert(rows[1]:find("+", 1, true), "positive delta expected: " .. rows[1])
+  for i = 1, 100 do me.goldLog[#me.goldLog + 1] = { d = today + i, m = i } end
+  R.Extras:RecordGold()
+  assert(#me.goldLog <= 90, "history must be capped at 90")
+  R.settings.goldHistory = false
+  local n = #me.goldLog
+  R.Extras:RecordGold()
+  assert(#me.goldLog == n, "off must not record")
+end)
+
+test("sell hint: needs Auctionator, picks the better venue, tolerates junk", function()
+  local env, R = boot()
+  assert(R.Extras:SellHint("x") == nil, "no hint without Auctionator")
+  env.Auctionator = { API = { v1 = { GetAuctionPriceByItemLink = function() return 9000 end } } }
+  R.Integrations.active.Auctionator = true
+  R.API.GetItemInfo = function() return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, 4000 end
+  local h = R.Extras:SellHint("x")
+  assert(h and h:find("Auction House", 1, true), "AH should win: " .. tostring(h))
+  R.API.GetItemInfo = function() return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, 12000 end
+  assert(R.Extras:SellHint("x"):find("Vendor", 1, true), "vendor should win")
+  R.API.GetItemInfo = function() return nil end
+  assert(R.Extras:SellHint("x") == nil, "no vendor price, no hint")
+  env.Auctionator.API.v1.GetAuctionPriceByItemLink = function() error("boom") end
+  R.API.GetItemInfo = function() return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, 4000 end
+  assert(R.Extras:SellHint("x") == nil, "erroring price source must be tolerated")
+  R.settings.sellHint = false
+  assert(R.Extras:SellHint("x") == nil, "off must give no hint")
+end)
+
+test("apicheck export opens a plain-text window; perf runs", function()
+  local env, R = boot()
+  local shown
+  R.UI.ShowTextWindow = function(_, title, text) shown = text end
+  R.Extras:PrintApiCheck(true)
+  assert(shown and shown:find("API check", 1, true) and not shown:find("|c", 1, true), "export text wrong")
+  R.Extras:PrintPerf()
+  assert(chatHas(env, "Perf:"), "perf output missing")
   assert(not env.__errors, "errors: " .. tostring(env.__errors and env.__errors[1]))
 end)

@@ -177,6 +177,21 @@ function Junk:Buyback(n)
 		return
 	end
 	local log = R.db.junkLog
+	if type(n) == "string" and n:lower() == "all" then
+		local bought = 0
+		for i = #log, 1, -1 do
+			for b = 1, GetNumBuybackItems() or 0 do
+				if GetBuybackItemLink(b) == log[i].link then
+					BuybackItem(b)
+					table.remove(log, i)
+					bought = bought + 1
+					break
+				end
+			end
+		end
+		R:Print(bought > 0 and ("Bought back " .. bought .. " item(s).") or "Nothing from the log is in the merchant's buyback list.")
+		return
+	end
 	n = tonumber(n) or 1
 	local want = log[n]
 	if not want then R:Print("No such sale in the log (/rum junklog)."); return end

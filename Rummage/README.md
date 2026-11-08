@@ -120,6 +120,10 @@ Rummage puts every item you own into one sortable table: full item names, item l
 
 Diagnostics: `/fdebug` (or `/rum debug`) toggles an overlay with memory, frame time, event rates and timings · `/fdebug report` · `/fdebug reset`. See `AUDIT.md` for the performance report.
 
+## Mail, gold and diagnostics (1.6.0)
+
+`/rum mail` lists characters whose cached mail is close to expiring (also warned at login; Settings > Safety). `/rum gold` shows each character's gold with 7 and 30 day change. `/rum perf` times a refresh and a scan. `/rum apicheck export` opens the API report to copy. `/rum buyback all` buys back every logged sale still on offer. With Auctionator, item tooltips say whether the vendor or the auction house pays more.
+
 ## Keyboard (1.5.0)
 
 In the list: Up/Down/Page Up/Page Down/Home/End select a row, Enter uses the item, Space cycles its favorite marker. Disabled while the search box has focus and in combat (setting: General → Keyboard navigation). Drag a bottom corner to scale; hold Shift to snap to 75/100/125/150%.

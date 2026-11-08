@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.6.0 — 2026-11-08
+
+1.5.0 was verified in game on Forever 1.60.1.70862 (keyboard capture, buyback and spec detection included). This release adds the items left on the suggestion list; the new code passes the offline suite (25 cases) and is not yet run in game.
+
+- **`/rum apicheck export`** opens the API report in the copy window, plain text, ready to paste into a bug report.
+- **Mail expiry warning.** The mailbox is only readable at a mailbox, so Rummage now stores each item's days left when it last saw the mail and ages it. At login, any character whose cached mail expires within N days (Settings > Safety, default 3, 0 = off) gets a chat line. `/rum mail` checks on demand.
+- **Gold history.** One snapshot per character per day (90 kept). `/rum gold` lists each character's gold with 7-day and 30-day change, plus the account total. Switch off with `Keep daily gold history`.
+- **Tooltip sell hint** (needs Auctionator): vendor price against auction price per unit, and which is higher. Raw prices; the auction cut is not modelled. Setting `Tooltip hint: vendor or auction house`.
+- **`/rum buyback all`** buys back every logged sale still in the merchant's buyback list.
+- **`/rum perf`:** window refresh time, inventory scan time, addon memory, cached character count.
+- **Release tooling:** `tools/package.sh` builds the zip and `SHA256SUMS.txt`; `.github/workflows/ci.yml` runs the gate on every push and PR; `release.yml` builds and publishes a release when a `v*` tag matching the TOC version is pushed.
+- **Already present, no change:** low-space warning, `/rum autoprofile set`, CSV export, reagent categories.
+
 ## 1.5.0 — 2026-11-08
 
 Items marked *Unverified* depend on client behaviour I could not test; they are written defensively (existence checks + `pcall`) and degrade to doing nothing.
