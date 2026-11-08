@@ -160,6 +160,12 @@ builders.general = function(p)
 	st:Place(profPick, 20, 4)
 	st:Check("Per-character profiles", "profilePerChar",
 		"On: each character automatically re-applies the profile last used on it at login.")
+	st:Check("Auto-switch profile by spec / zone", "autoProfile",
+		"Targets are set with /rum autoprofile set <spec1-4|dungeon|raid|battleground|arena|world> <profile>.")
+	st:Check("Remember window size and scale per view", "perViewSize",
+		"Bags, Bank and other characters each keep their own size and scale.")
+	st:Check("Keyboard navigation in the list", "keyboardNav",
+		"Arrows / Page / Home / End select, Enter uses, Space cycles the favorite marker. Off while typing in search or in combat.")
 	return st
 end
 
@@ -208,6 +214,8 @@ builders.appearance = function(p)
 	st:Check("Tint items you can't use yet", "tintUnusable")
 	st:Check("Quest-starter badges", "questBadges")
 	st:Check("Item level on grid icons", "gridItemLevel")
+	st:Check("Colourblind-safe quality tags", "colorblindCues", "Adds a short text tag ([Rare], [Epic]...) before item names.", Relayout)
+	st:Slider("Dim characters not seen for", "staleDays", 0, 90, 1, function(v) return v == 0 and "never" or (v .. " days") end)
 	return st
 end
 
@@ -218,6 +226,11 @@ builders.items = function(p)
 	st:Check("Use Scrap's junk list (if installed)", "useScrap")
 	st:Check("Never sell favorites", "protectFavorites")
 	st:Check("Buyback-safe (sell max 12 per visit)", "buybackSafe", "Sells only the 12 most valuable junk items so every sale can still be bought back.")
+	st:Check("Confirm sales with Uncommon+ items", "sellConfirmQuality", "Asks before selling junk when the batch includes a green or better item.")
+	st:Place(W:Slider(p, "Confirm sales worth over", 0, 1000, 10,
+		function() return math.floor((S().sellConfirmValue or 0) / 10000) end,
+		function(v) S().sellConfirmValue = v * 10000 end,
+		function(v) return v == 0 and "off" or (v .. "g") end), 34, 6)
 	st:Check("Auto-repair at merchants", "autoRepair")
 	st:Check("Prefer guild funds for repairs", "autoRepairGuild")
 	st:Note("Mark junk: click the coin column, or Alt+right-click an item. Grey items are junk by default.")
@@ -267,6 +280,7 @@ builders.items = function(p)
 	st:Header("Upgrade popup")
 	st:Check("Show when I loot an upgrade", "upgradePopup",
 		"A small popup appears when new gear is better than what you're wearing, with a one-click Equip button.")
+	st:Check("Show stat changes in the popup", "upgradeStatDiff")
 	st:Check("Judge by item level without Pawn", "upgradeIlvlFallback",
 		"With Pawn installed, Pawn decides. Without it, higher item level for your armor type counts as an upgrade.")
 	st:Check("Play a sound", "upgradeSound")

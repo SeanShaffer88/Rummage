@@ -155,6 +155,11 @@ function D:Report()
 		local version, build = GetBuildInfo()
 		R:Print("client " .. tostring(version) .. " (build " .. tostring(build) .. ")")
 	end
+	-- Which bank path this client resolved to (item 5): tabs or legacy bags.
+	R:Print("bank path: " .. (API.BankTabs and "character bank tabs" or "legacy bank + bank bags")
+		.. " [" .. table.concat(API.BankBagList, ",") .. "]"
+		.. (API.REAGENTBANK and (" reagent=" .. API.REAGENTBANK) or "")
+		.. (API.KEYRING and (" keyring=" .. API.KEYRING) or ""))
 	local was = R:IsDebug()
 	if not was then R:SetDebug(true) end
 	for line in (self:Snapshot() .. "\n"):gmatch("(.-)\n") do

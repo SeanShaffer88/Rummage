@@ -77,7 +77,7 @@ function Junk:Collect()
 					local protected = R.settings.protectFavorites and R.db.favorites[e.id]
 					if inf and inf.sell > 0 and not noValue and not protected and self:IsJunk(e) then
 						local v = inf.sell * (count or 1)
-						list[#list + 1] = { bag, slot, v }
+						list[#list + 1] = { bag, slot, v, e.quality or 0, link, count or 1 }
 						total = total + v
 					end
 				end
@@ -109,7 +109,26 @@ function Junk:TotalValue()
 	return total
 end
 
-function Junk:SellAll()
+-- True when the sale should be confirmed first (1.5.0 safeguards): it includes an
+-- Uncommon-or-better item, or its total value is above the configured threshold.
+function Junk:NeedsConfirm(list, total)
+	local st = R.settings
+	if st.sellConfirmQuality then
+		for i = 1, #list do
+			if (list[i][4] or 0) >= 2 then return true end
+		end
+	end
+	local limit = st.sellConfirmValue or 0
+	return limit > 0 and total > limit
+end
+
+local function LogSale(it)
+	local log = R.db.junkLog
+	table.insert(log, 1, { t = time(), link = it[5] or "", count = it[6] or 1, value = it[3] or 0 })
+	for i = #log, 31, -1 do log[i] = nil end
+end
+
+function Junk:SellAll(confirmed)
 	if not MerchantOpen() then
 		R:Print("Open a merchant to sell junk.")
 		return
@@ -118,6 +137,10 @@ function Junk:SellAll()
 	local list, total = self:Collect()
 	if #list == 0 then
 		R:Print("No junk to sell.")
+		return
+	end
+	if not confirmed and self:NeedsConfirm(list, total) then
+		StaticPopup_Show("RUMMAGE_SELL_CONFIRM", #list, R.FormatMoney(total))
 		return
 	end
 	local i = 0
@@ -132,15 +155,49 @@ function Junk:SellAll()
 			local it = list[i]
 			if not it then
 				self.ticker:Cancel(); self.ticker = nil
-				R:Print(format("Sold %d junk item(s) for %s.", sold, R.FormatMoney(total)))
+				R:Print(format("Sold %d junk item(s) for %s. /rum buyback undoes the last sale.", sold, R.FormatMoney(total)))
 				return
 			end
+			LogSale(it)
 			API.UseContainerItem(it[1], it[2])
 			sold = sold + 1
 		end
 	end
 	self.ticker = C_Timer.NewTicker(0.25, step)
 	step()
+end
+
+-- Buyback shortcut. Matches the logged item link against the merchant's buyback
+-- list instead of trusting a slot number. UNVERIFIED on Forever 1.60.1: needs the
+-- classic GetNumBuybackItems / GetBuybackItemLink / BuybackItem trio, guarded here.
+function Junk:Buyback(n)
+	if not MerchantOpen() then R:Print("Open a merchant to buy items back."); return end
+	if not (GetNumBuybackItems and GetBuybackItemLink and BuybackItem) then
+		R:Print("Buyback API not available on this client.")
+		return
+	end
+	local log = R.db.junkLog
+	n = tonumber(n) or 1
+	local want = log[n]
+	if not want then R:Print("No such sale in the log (/rum junklog)."); return end
+	for i = 1, GetNumBuybackItems() or 0 do
+		if GetBuybackItemLink(i) == want.link then
+			BuybackItem(i)
+			table.remove(log, n)
+			R:Print("Bought back " .. want.link .. ".")
+			return
+		end
+	end
+	R:Print("That item is no longer in the merchant's buyback list.")
+end
+
+function Junk:PrintLog()
+	local log = R.db.junkLog
+	if #log == 0 then R:Print("Junk-sale log is empty."); return end
+	for i = 1, math.min(#log, 10) do
+		local e = log[i]
+		R:Print(format("%d. %s x%d  %s  (%s ago)", i, e.link, e.count or 1, R.FormatMoney(e.value or 0), R.FormatAge(e.t)))
+	end
 end
 
 R:RegisterEvent("MERCHANT_SHOW", function()

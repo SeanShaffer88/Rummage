@@ -116,9 +116,13 @@ Rummage puts every item you own into one sortable table: full item names, item l
 
 ## Commands
 
-`/rum` toggle bags · `/rum bank` · `/rum search <text>` · `/rum config` · `/rum restack` · `/rum sell` · `/rum conflicts` · `/rum keys` · `/rum upgrade` (preview popup) · `/rum export` · `/rum import <string>` · `/rum reset`
+`/rum` toggle bags · `/rum bank` · `/rum search <text>` · `/rum config` · `/rum restack` · `/rum sell` · `/rum conflicts` · `/rum keys` · `/rum upgrade` (preview popup) · `/rum export` · `/rum import <string>` · `/rum apicheck` (which APIs this client has) · `/rum inventory [csv|text]` (copy every character's items) · `/rum autoprofile` (profile by spec/zone) · `/rum savesearch` · `/rum junklog` · `/rum buyback [n]` · `/rum reset`
 
 Diagnostics: `/fdebug` (or `/rum debug`) toggles an overlay with memory, frame time, event rates and timings · `/fdebug report` · `/fdebug reset`. See `AUDIT.md` for the performance report.
+
+## Keyboard (1.5.0)
+
+In the list: Up/Down/Page Up/Page Down/Home/End select a row, Enter uses the item, Space cycles its favorite marker. Disabled while the search box has focus and in combat (setting: General → Keyboard navigation). Drag a bottom corner to scale; hold Shift to snap to 75/100/125/150%.
 
 ## Mouse
 

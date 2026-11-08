@@ -193,7 +193,7 @@ R.L = {
 	tabGeneral = "General", tabAppearance = "Appearance", tabItems = "Items & Junk",
 	tabColumns = "Columns", tabCategories = "Categories", tabAbout = "About",
 	preset = "Preset",
-	slashUsage = "/rum [bank | search <text> | config | restack | sell | conflicts | keys | reset | upgrade (preview popup) | export | import <string> | debug [report|reset]]",
+	slashUsage = "/rum [bank | search <text> | config | restack | sell | conflicts | keys | reset | upgrade (preview popup) | export | import <string> | apicheck | inventory [csv|text] | autoprofile | savesearch | junklog | buyback [n] | debug [report|reset]]",
 }
 do
 	local loc = (GetLocale and GetLocale()) or "enUS"
@@ -217,6 +217,26 @@ R.DeepCopy = DeepCopy
 function R:Print(...)
 	local msg = string.join(" ", tostringall(...))
 	DEFAULT_CHAT_FRAME:AddMessage("|cffd9a441Rummage|r: " .. msg)
+end
+
+-- Secret values ("addon disarmament"): tooltip/aura-like data can be unreadable inside
+-- restricted contexts. Both helpers exist on every client; they are no-ops where the
+-- globals are absent.
+function R.IsSecret(v)
+	local f = _G.issecretvalue
+	if f then
+		local ok, res = pcall(f, v)
+		return ok and res and true or false
+	end
+	return false
+end
+function R.CanAccess(v)
+	local f = _G.canaccessvalue
+	if f then
+		local ok, res = pcall(f, v)
+		return ok and res and true or false
+	end
+	return true
 end
 
 function R.ItemID(link)
@@ -280,6 +300,21 @@ function R.FormatAge(ts)
 	if d < 86400 then return floor(d / 3600) .. "h" end
 	if d < 86400 * 60 then return floor(d / 86400) .. "d" end
 	return floor(d / (86400 * 30)) .. "mo"
+end
+
+-- A cached character is stale when it has not been seen for settings.staleDays days.
+function R.IsStale(c)
+	local days = R.settings and R.settings.staleDays or 0
+	if days <= 0 or type(c) ~= "table" or type(c.lastSeen) ~= "number" then return false end
+	return (time() - c.lastSeen) > days * 86400
+end
+
+-- Short text tag shown next to the item name when colourblind cues are on, so
+-- quality never depends on colour alone.
+local QUALITY_TAG = { [0] = "[Poor]", [2] = "[Unc]", [3] = "[Rare]", [4] = "[Epic]", [5] = "[Leg]", [6] = "[Art]", [7] = "[Her]" }
+function R.QualityTag(q)
+	if not (R.settings and R.settings.colorblindCues) then return "" end
+	return QUALITY_TAG[q] or ""
 end
 
 function R.ClassColor(class)
@@ -361,13 +396,23 @@ R.defaults = {
 	tsmSource = "DBMarket",
 	columns = { order = {}, hidden = {}, widths = {} },
 	collapsed = {},
+	-- 1.5.0
+	perViewSize = false,    -- remember window size + scale separately for Bags / Bank / All characters
+	viewSizes = {},         -- [bags|bank|all] = { w, h, scale }
+	keyboardNav = true,     -- arrows / Enter / Space in the list while the search box is not focused
+	colorblindCues = false, -- quality shown with a text tag as well as colour
+	staleDays = 14,         -- cached characters not seen for this long are dimmed; 0 = off
+	sellConfirmValue = 0,   -- copper; selling junk worth more than this asks first (0 = off)
+	sellConfirmQuality = true, -- ask first when a sale includes Uncommon or better
+	autoProfile = false,    -- switch profile by spec / zone type (see /rum autoprofile)
+	upgradeStatDiff = true, -- list stat changes in the upgrade popup
 }
 
 ---------------------------------------------------------------------------
 -- SavedVariables sanitizing. The WTF file is user-editable and may come from an
 -- older or corrupted version, so every value is type-checked, clamped or dropped.
 ---------------------------------------------------------------------------
-local DB_VERSION = 3
+local DB_VERSION = 4
 
 -- Fills missing keys and replaces values whose type differs from the default.
 local function CopyDefaults(src, dst)
@@ -385,7 +430,7 @@ end
 local CLAMP = {
 	scale = { 0.5, 2 }, alpha = { 0.1, 1 }, fontSize = { 6, 24 }, rowHeight = { 14, 40 },
 	gridSize = { 20, 64 }, width = { 400, 3000 }, height = { 300, 2000 }, lowSpaceWarn = { 0, 40 },
-	upgradeDuration = { 0, 120 },
+	upgradeDuration = { 0, 120 }, staleDays = { 0, 365 }, sellConfirmValue = { 0, 100000000 },
 }
 local ENUMS = {
 	viewMode = { list = true, grid = true },
@@ -426,6 +471,15 @@ local function SanitizeSettings(st)
 		else cols.widths[k] = min(600, max(16, v)) end
 	end
 	for k, v in pairs(st.collapsed) do if v ~= true then st.collapsed[k] = nil end end
+	-- 1.5.0: per-view layouts. Only the three known views, each { w, h, scale } within bounds.
+	local vs = {}
+	for _, key in ipairs({ "bags", "bank", "all" }) do
+		local v = st.viewSizes[key]
+		if type(v) == "table" and type(v.w) == "number" and type(v.h) == "number" and type(v.scale) == "number" then
+			vs[key] = { w = min(3000, max(400, v.w)), h = min(2000, max(300, v.h)), scale = min(2, max(0.5, v.scale)) }
+		end
+	end
+	st.viewSizes = vs
 end
 
 local function ValidSlot(s)
@@ -525,6 +579,27 @@ function R:InitDB()
 		end
 	end
 	db.sortPresets = presets
+	-- 1.5.0 additions: saved searches, junk-sale log, auto-profile map.
+	if type(db.savedSearches) ~= "table" then db.savedSearches = {} end
+	local saved = {}
+	for _, q in ipairs(db.savedSearches) do
+		if type(q) == "string" and q ~= "" and #saved < 8 then saved[#saved + 1] = q end
+	end
+	db.savedSearches = saved
+	if type(db.junkLog) ~= "table" then db.junkLog = {} end
+	local jl = {}
+	for _, e in ipairs(db.junkLog) do
+		if type(e) == "table" and type(e.t) == "number" and type(e.link) == "string"
+			and type(e.value) == "number" and #jl < 30 then
+			e.count = type(e.count) == "number" and e.count or 1
+			jl[#jl + 1] = e
+		end
+	end
+	db.junkLog = jl
+	if type(db.contextProfiles) ~= "table" then db.contextProfiles = {} end
+	for k, v in pairs(db.contextProfiles) do
+		if type(k) ~= "string" or type(v) ~= "string" then db.contextProfiles[k] = nil end
+	end
 	db.version = DB_VERSION
 	R.db = db
 	R.settings = db.settings

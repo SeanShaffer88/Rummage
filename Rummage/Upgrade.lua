@@ -32,6 +32,47 @@ local frame, ticker, shownAt
 local pendingCombatEquip
 
 ---------------------------------------------------------------------------
+-- Stat diff (1.5.0): "+12 Strength, -3 Stamina" versus the item being replaced.
+-- Uses the item-stats API when the client has it; returns "" otherwise.
+---------------------------------------------------------------------------
+local function ItemStats(link)
+	local f = (C_Item and C_Item.GetItemStats) or _G.GetItemStats
+	if not f or not link then return nil end
+	local ok, st = pcall(f, link)
+	if ok and type(st) == "table" then return st end
+end
+
+function U.StatDiff(newLink, oldLink)
+	local a, b = ItemStats(newLink), ItemStats(oldLink)
+	if not a then return "" end
+	b = b or {}
+	local diffs = {}
+	for key, v in pairs(a) do
+		if type(v) == "number" and not R.IsSecret(v) then
+			local d = v - (type(b[key]) == "number" and b[key] or 0)
+			if d ~= 0 then diffs[#diffs + 1] = { key = key, d = d } end
+		end
+	end
+	for key, v in pairs(b) do
+		if a[key] == nil and type(v) == "number" and not R.IsSecret(v) and v ~= 0 then
+			diffs[#diffs + 1] = { key = key, d = -v }
+		end
+	end
+	table.sort(diffs, function(x, y)
+		local ax, ay = math.abs(x.d), math.abs(y.d)
+		if ax ~= ay then return ax > ay end
+		return x.key < y.key
+	end)
+	local parts = {}
+	for i = 1, math.min(4, #diffs) do
+		local e = diffs[i]
+		local label = _G[e.key .. "_SHORT"] or _G[e.key] or e.key:gsub("^ITEM_MOD_", ""):gsub("_SHORT$", ""):gsub("_", " "):lower()
+		parts[#parts + 1] = format("|cff%s%+d|r %s", e.d > 0 and "40ff40" or "ff6060", e.d, label)
+	end
+	return table.concat(parts, ", ")
+end
+
+---------------------------------------------------------------------------
 -- Evaluation
 ---------------------------------------------------------------------------
 local scanTip
@@ -47,9 +88,15 @@ local function UsableNow(bag, slot)
 	for i = 2, scanTip:NumLines() do
 		for _, side in ipairs({ "Left", "Right" }) do
 			local fs = _G["RummageUpgradeScanTooltipText" .. side .. i]
-			if fs and fs:IsShown() and (fs:GetText() or "") ~= "" then
-				local r, g, b = fs:GetTextColor()
-				if r > 0.9 and g < 0.2 and b < 0.2 then return false end
+			if fs and fs:IsShown() then
+				local txt = fs:GetText()
+				-- secret values can't be compared: treat that line as usable
+				if not R.IsSecret(txt) and (txt or "") ~= "" then
+					local r, g, b = fs:GetTextColor()
+					if not (R.IsSecret(r) or R.IsSecret(g) or R.IsSecret(b)) and r > 0.9 and g < 0.2 and b < 0.2 then
+						return false
+					end
+				end
 			end
 		end
 	end
@@ -275,7 +322,12 @@ function U:ShowNext(keep)
 	frame.title:SetText(#queue > 1 and format("UPGRADE  ·  1 of %d", #queue) or "UPGRADE")
 	frame.title:SetTextColor(skin.accent[1], skin.accent[2], skin.accent[3])
 	frame.name:SetText(hex .. (inf and inf.name or q.link) .. "|r")
-	frame.detail:SetText(q.detail or "")
+	local detail = q.detail or ""
+	if R.settings.upgradeStatDiff and q.target and not q.preview then
+		local diff = U.StatDiff(q.link, GetInventoryItemLink("player", q.target))
+		if diff ~= "" then detail = detail .. "\n" .. diff end
+	end
+	frame.detail:SetText(detail)
 	frame.bar:SetColorTexture(skin.accent[1], skin.accent[2], skin.accent[3], 0.8)
 	local inCombat = InCombatLockdown()
 	frame.equip:SetLabel((q == pendingCombatEquip) and "Queued" or (inCombat and "After" or "Equip"))
@@ -325,7 +377,7 @@ function U:Test()
 			local link = API.GetSlotInfo(bag, slot)
 			local inf = link and R.Items:Info(link)
 			if inf and inf.equippable and SLOTS[inf.equipLoc] then
-				table.insert(queue, 1, { link = link, id = R.ItemID(link), target = SLOTS[inf.equipLoc][1], detail = "Preview — drag to move" })
+				table.insert(queue, 1, { link = link, id = R.ItemID(link), target = SLOTS[inf.equipLoc][1], detail = "Preview — drag to move", preview = true })
 				return self:ShowNext(true)
 			end
 		end

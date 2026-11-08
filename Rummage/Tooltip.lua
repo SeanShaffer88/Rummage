@@ -53,6 +53,8 @@ end
 
 function Tooltip:Add(tt, link)
 	if not Enabled() or not link then return end
+	-- Secret values (restricted contexts) can't be parsed or compared: skip quietly.
+	if R.IsSecret(link) or R.IsSecret(tt) or not R.CanAccess(link) then return end
 	local id = R.ItemID(link)
 	if not id then return end
 	if tt.rummageID == id then return end
@@ -85,20 +87,20 @@ function Tooltip:Init()
 			if tt ~= GameTooltip and tt ~= ItemRefTooltip then return end
 			local link
 			if TooltipUtil and TooltipUtil.GetDisplayedItem then
-				local _, l = TooltipUtil.GetDisplayedItem(tt)
-				link = l
+				local ok, _, l = pcall(TooltipUtil.GetDisplayedItem, tt)
+				if ok then link = l end
 			elseif tt.GetItem then
-				local _, l = tt:GetItem()
-				link = l
+				local ok, _, l = pcall(tt.GetItem, tt)
+				if ok then link = l end
 			end
-			if link then Tooltip:Add(tt, link) end
+			if type(link) == "string" and not R.IsSecret(link) then Tooltip:Add(tt, link) end
 		end)
 	else
 		for _, tt in ipairs(tips) do
 			if tt and tt.HasScript and tt:HasScript("OnTooltipSetItem") then
 				tt:HookScript("OnTooltipSetItem", function(self)
-					local _, link = self:GetItem()
-					if link then Tooltip:Add(self, link) end
+					local ok, _, link = pcall(self.GetItem, self)
+					if ok and type(link) == "string" then Tooltip:Add(self, link) end
 				end)
 			end
 		end
