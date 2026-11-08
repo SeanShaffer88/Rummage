@@ -1,6 +1,6 @@
 # Rummage — Features
 
-The full feature list for Rummage 1.6.0 for WoW Forever
+The full feature list for Rummage 1.7.1 for WoW Forever
 (Interface 16001). For the short version see `README.md`; for
 store-listing copy see `DESCRIPTION.md`.
 
@@ -141,6 +141,15 @@ Auctionator (price columns, `ah>` search), TradeSkillMaster (any
 custom price source, `tsm>` search), Pawn (upgrade arrow and %,
 `pawn>` search), Can I Mog It? (transmog status), Scrap (junk
 list), Syndicator (tooltip counts step aside).
+
+## New in 1.7.1
+
+Settings tabs scroll (mouse wheel + scroll bar); About lists all commands.
+
+## New in 1.7.0
+
+Window up to 4000 x 2400 with left, right and bottom edge handles. Every column,
+Name included, resizes from its header edge; double-click the edge to reset it.
 
 ## New in 1.6.0
 

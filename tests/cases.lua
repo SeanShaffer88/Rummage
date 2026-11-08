@@ -479,3 +479,14 @@ test("columns: a dragged Name width stops flexing; reset restores flex; limits a
   assert(R2.settings.width == 3900 and R2.settings.height == 2300, "wide window must be allowed")
   assert(R2.settings.columns.widths.name == 1200 and R2.settings.columns.widths.ilvl == 90, "column width cap is 1200")
 end)
+
+test("settings window: every tab builds inside a scroll frame without errors", function()
+  local env, R = boot()
+  for _, tab in ipairs({ "general", "appearance", "items", "columns", "categories", "about" }) do
+    R.Options:Show(tab)
+    local page = R.Options.pages[tab]
+    assert(page and page.content and page.stacker, tab .. " page not built")
+    assert(page.content:GetHeight() >= 10, tab .. " content height")
+  end
+  assert(not env.__errors, "errors: " .. tostring(env.__errors and env.__errors[1]))
+end)

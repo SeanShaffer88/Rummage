@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.7.1 — 2026-11-08
+
+Fix from in-game screenshots of 1.6.0: settings tabs ran past the bottom of the settings window (General lost its last rows, Columns overlapped its footer, About spilled out). Passes the offline suite (27 cases); not yet run in game.
+
+- **Settings tabs scroll.** Every tab is a scroll frame with mouse-wheel scrolling and a thin scroll bar that appears when needed. Tabs that place widgets outside the normal flow (the column list) grow to fit.
+- **About lists every command** (`buyback`, `junklog`, `gold`, `mail`, `perf`, `inventory`, `apicheck export`).
+
+## 1.7.0 — 2026-11-08
+
+Wider windows and easier column resizing. (Docs and version bump for this release shipped late, in 1.7.1.)
+
+- **Wider window.** Maximum width is now 4000 and height 2400 (was 2000 x 1600), and the saved-size limits match. A new left-edge handle joins the right-edge and bottom-edge ones; the side handles are 8 px wide instead of 5.
+- **Resizable Name column.** Name fills the free space until you drag its header edge; then it keeps that width. Double-click the edge to hand it back to flex.
+- **Easier column handles.** Header resize handles are 10 px wide, sit above neighbouring headers, light up gold on hover, and show a tooltip. Double-click a handle to reset that column. Column width cap raised from 600 to 1200.
+
 ## 1.6.0 — 2026-11-08
 
 1.5.0 was verified in game on Forever 1.60.1.70862 (keyboard capture, buyback and spec detection included). This release adds the items left on the suggestion list; the new code passes the offline suite (25 cases) and is not yet run in game.

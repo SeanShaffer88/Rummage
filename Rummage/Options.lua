@@ -445,7 +445,7 @@ builders.about = function(p)
 	st:Header("Keybinds")
 	st:Note("Routed to Rummage: " .. (R.Hooks:BoundKeys() or "none"))
 	st:Header("Slash commands")
-	st:Note("/rum  toggle bags\n/rum bank  toggle bank\n/rum search <text>\n/rum config\n/rum restack\n/rum sell\n/rum conflicts\n/rum reset  (window position)\n/rum export · /rum import <string>")
+	st:Note("/rum  toggle bags\n/rum bank  toggle bank\n/rum search <text>\n/rum config\n/rum restack\n/rum sell\n/rum buyback [n|all]\n/rum junklog\n/rum gold  ·  /rum mail  ·  /rum perf\n/rum inventory  ·  /rum apicheck [export]\n/rum conflicts\n/rum reset  (window position)\n/rum export · /rum import <string>")
 	st:Header("Settings sharing")
 	local expB = W:Button(p, "Export settings...", COL2 - 30, 20, function() StaticPopup_Show("RUMMAGE_EXPORT_SETTINGS") end)
 	st:Place(expB, 20, 4)
@@ -532,10 +532,54 @@ function O:Show(tab)
 	tab = tab or self.current or "general"
 	for key, page in pairs(self.pages) do page:SetShown(key == tab) end
 	if not self.pages[tab] then
-		local page = CreateFrame("Frame", nil, self.frame)
+		-- Each tab scrolls: settings grew past the window height (1.6.0 screenshots).
+		local page = CreateFrame("ScrollFrame", nil, self.frame)
 		page:SetPoint("TOPLEFT", 4, -66)
 		page:SetPoint("BOTTOMRIGHT", -4, 28)
-		page.stacker = builders[tab](page)
+		local content = CreateFrame("Frame", nil, page)
+		content:SetSize(WIDTH - 24, 10)
+		page:SetScrollChild(content)
+		page:EnableMouseWheel(true)
+		page:SetScript("OnMouseWheel", function(sf, delta)
+			local top = sf:GetVerticalScrollRange() or 0
+			sf:SetVerticalScroll(math.min(top, math.max(0, (sf:GetVerticalScroll() or 0) - delta * 40)))
+		end)
+		local sb = CreateFrame("Slider", nil, page)
+		sb:SetOrientation("VERTICAL")
+		sb:SetWidth(8)
+		sb:SetPoint("TOPRIGHT", page, "TOPRIGHT", -2, -2)
+		sb:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -2, 2)
+		local thumb = sb:CreateTexture(nil, "OVERLAY")
+		thumb:SetColorTexture(1, 1, 1, 0.25)
+		thumb:SetSize(8, 36)
+		sb:SetThumbTexture(thumb)
+		sb:SetMinMaxValues(0, 0)
+		sb:SetValueStep(1)
+		sb:Hide()
+		sb:SetScript("OnValueChanged", function(_, v) page:SetVerticalScroll(v) end)
+		page:SetScript("OnScrollRangeChanged", function(_, _, yrange)
+			yrange = yrange or 0
+			sb:SetMinMaxValues(0, yrange)
+			sb:SetShown(yrange > 0)
+		end)
+		page:SetScript("OnVerticalScroll", function(_, off) sb:SetValue(off or 0) end)
+		page.stacker = builders[tab](content)
+		page.content = content
+		local st = page.stacker
+		content:SetHeight(math.max(10, math.max(-(st.y[0] or 0), -(st.y[1] or 0)) + 16))
+		-- Some tabs place widgets outside the stacker (the column list): once laid out,
+		-- grow the content to the lowest child so nothing is unreachable.
+		if C_Timer and C_Timer.After then
+			C_Timer.After(0.1, function()
+				local top, low = content:GetTop(), nil
+				if not top then return end
+				for _, child in ipairs({ content:GetChildren() }) do
+					local b = child.IsShown and child:IsShown() and child:GetBottom()
+					if b and (not low or b < low) then low = b end
+				end
+				if low and top - low + 16 > content:GetHeight() then content:SetHeight(top - low + 16) end
+			end)
+		end
 		self.pages[tab] = page
 	end
 	for key, b in pairs(self.tabButtons) do b:SetActive(key == tab) end

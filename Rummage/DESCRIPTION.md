@@ -66,4 +66,4 @@ Rummage is by Malikor, GPLv3 or later. It brings together the
 feature sets of Sorted and its plugins in a single addon, plus
 Baganator/Syndicator-style cross-character tracking. 1.5.0 added keyboard navigation, saved searches, a junk-sale log with buyback, sell confirmations, inventory export, auto-profiles by spec/zone, an upgrade stat diff and `/rum apicheck`. 1.6.0 adds mail-expiry warnings, gold history and a sell hint.
 
-**Status note:** 1.5.0 was verified in game on Forever 1.60.1.70862. 1.6.0 adds mail-expiry warnings, gold history, a vendor-or-AH tooltip hint, `/rum perf` and `/rum buyback all`; it passes the offline test suite (`tests/`) and is not yet run in game.
+**Status note:** 1.5.0 was verified in game on Forever 1.60.1.70862. 1.6.0 added mail-expiry warnings, gold history, a vendor-or-AH tooltip hint, `/rum perf` and `/rum buyback all`; 1.7.0 allows much wider windows and resizable columns (Name included); 1.7.1 makes settings tabs scroll; it passes the offline test suite (`tests/`) and is not yet run in game.
