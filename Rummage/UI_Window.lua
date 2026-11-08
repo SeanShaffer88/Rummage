@@ -101,9 +101,13 @@ function UI:CreateGrips()
 	local function MakeEdge(dir)
 		local e = CreateFrame("Button", nil, f)
 		if dir == "RIGHT" then
-			e:SetWidth(5)
+			e:SetWidth(8)
 			e:SetPoint("TOPRIGHT", f, "TOPRIGHT", 0, -40)
 			e:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 20)
+		elseif dir == "LEFT" then
+			e:SetWidth(8)
+			e:SetPoint("TOPLEFT", f, "TOPLEFT", 0, -40)
+			e:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 0, 20)
 		else
 			e:SetHeight(5)
 			e:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 20, 0)
@@ -115,12 +119,13 @@ function UI:CreateGrips()
 		e:SetScript("OnMouseUp", function() f:StopMovingOrSizing(); UI:SavePosition(); UI:Layout() end)
 		e:SetScript("OnEnter", function(self)
 			GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
-			GameTooltip:AddLine(dir == "RIGHT" and "Drag to change the width" or "Drag to change the height")
+			GameTooltip:AddLine((dir == "RIGHT" or dir == "LEFT") and "Drag to change the width" or "Drag to change the height")
 			GameTooltip:Show()
 		end)
 		e:SetScript("OnLeave", function() GameTooltip:Hide() end)
 	end
 	MakeEdge("RIGHT")
+	MakeEdge("LEFT")
 	MakeEdge("BOTTOM")
 end
 

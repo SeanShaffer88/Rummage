@@ -432,7 +432,7 @@ end
 
 local CLAMP = {
 	scale = { 0.5, 2 }, alpha = { 0.1, 1 }, fontSize = { 6, 24 }, rowHeight = { 14, 40 },
-	gridSize = { 20, 64 }, width = { 400, 3000 }, height = { 300, 2000 }, lowSpaceWarn = { 0, 40 }, mailWarnDays = { 0, 28 },
+	gridSize = { 20, 64 }, width = { 400, 4000 }, height = { 300, 2400 }, lowSpaceWarn = { 0, 40 }, mailWarnDays = { 0, 28 },
 	upgradeDuration = { 0, 120 }, staleDays = { 0, 365 }, sellConfirmValue = { 0, 100000000 },
 }
 local ENUMS = {
@@ -471,7 +471,7 @@ local function SanitizeSettings(st)
 	for k, v in pairs(cols.hidden) do if type(k) ~= "string" or v ~= true then cols.hidden[k] = nil end end
 	for k, v in pairs(cols.widths) do
 		if type(k) ~= "string" or type(v) ~= "number" then cols.widths[k] = nil
-		else cols.widths[k] = min(600, max(16, v)) end
+		else cols.widths[k] = min(1200, max(16, v)) end
 	end
 	for k, v in pairs(st.collapsed) do if v ~= true then st.collapsed[k] = nil end end
 	-- 1.5.0: per-view layouts. Only the three known views, each { w, h, scale } within bounds.
@@ -479,7 +479,7 @@ local function SanitizeSettings(st)
 	for _, key in ipairs({ "bags", "bank", "all" }) do
 		local v = st.viewSizes[key]
 		if type(v) == "table" and type(v.w) == "number" and type(v.h) == "number" and type(v.scale) == "number" then
-			vs[key] = { w = min(3000, max(400, v.w)), h = min(2000, max(300, v.h)), scale = min(2, max(0.5, v.scale)) }
+			vs[key] = { w = min(4000, max(400, v.w)), h = min(2400, max(300, v.h)), scale = min(2, max(0.5, v.scale)) }
 		end
 	end
 	st.viewSizes = vs

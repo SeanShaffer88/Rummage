@@ -83,7 +83,7 @@ function UI:Create()
 	f:SetMovable(true)
 	f:SetResizable(true)
 	f:EnableMouse(true)
-	API.SetResizeBounds(f, 460, 320, 2000, 1600)
+	API.SetResizeBounds(f, 460, 320, 4000, 2400)
 	f:RegisterForDrag("LeftButton")
 	f:SetScript("OnDragStart", function(self) if not R.settings.locked then self:StartMoving() end end)
 	f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing(); UI:SavePosition() end)
@@ -502,7 +502,8 @@ function UI:ComputeColumns()
 	local width = self:ListWidth()
 	local fixed, flexCol = 0, nil
 	for _, col in ipairs(cols) do
-		if col.flex then flexCol = col else
+		-- A flex column fills the leftover space until the user drags it to a width.
+		if col.flex and not R.settings.columns.widths[col.key] then flexCol = col else
 			local w = col.kind == "icon" and (self:RowHeight() + 2) or R.Columns:Width(col)
 			fixed = fixed + w + 4
 		end
@@ -556,21 +557,44 @@ function UI:UpdateHeaders()
 			W:SetTooltip(b, function(self) return self.colLabel end, "Click to sort. Right-click to choose columns. Drag the right edge to resize.")
 			-- resize handle
 			local h = CreateFrame("Frame", nil, b)
-			h:SetWidth(6)
-			h:SetPoint("TOPRIGHT", 3, 0)
-			h:SetPoint("BOTTOMRIGHT", 3, 0)
+			h:SetWidth(10)
+			h:SetPoint("TOPRIGHT", 5, 0)
+			h:SetPoint("BOTTOMRIGHT", 5, 0)
+			h:SetFrameLevel(b:GetFrameLevel() + 5)
 			h:EnableMouse(true)
 			h.tex = h:CreateTexture(nil, "OVERLAY")
 			h.tex:SetColorTexture(1, 1, 1, 0.15)
 			h.tex:SetPoint("TOP")
 			h.tex:SetPoint("BOTTOM")
 			h.tex:SetWidth(1)
+			h:SetScript("OnEnter", function(self)
+				self.tex:SetColorTexture(1, 0.82, 0.2, 0.9)
+				GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
+				GameTooltip:AddLine("Drag to resize the column")
+				GameTooltip:AddLine("Double-click to reset it", 0.7, 0.7, 0.7)
+				GameTooltip:Show()
+			end)
+			h:SetScript("OnLeave", function(self)
+				if not UI.resizing then self.tex:SetColorTexture(1, 1, 1, 0.15) end
+				GameTooltip:Hide()
+			end)
 			h:SetScript("OnMouseDown", function()
+				local now = GetTime and GetTime() or 0
+				if h.lastDown and now - h.lastDown < 0.4 then
+					h.lastDown = nil
+					R.settings.columns.widths[b.colKey] = nil
+					UI:Layout()
+					return
+				end
+				h.lastDown = now
 				local x = GetCursorPosition() / b:GetEffectiveScale()
 				UI.resizing = { key = b.colKey, startX = x, startW = b:GetWidth(), button = b }
 				UI.colhead:SetScript("OnUpdate", function() UI:ResizeColumnUpdate() end)
 			end)
-			h:SetScript("OnMouseUp", function() UI:EndResize() end)
+			h:SetScript("OnMouseUp", function(self)
+				self.tex:SetColorTexture(1, 1, 1, 0.15)
+				UI:EndResize()
+			end)
 			b.handle = h
 			self.headerButtons[col.key] = b
 		end
@@ -611,7 +635,7 @@ function UI:ResizeColumnUpdate()
 	if not r then return end
 	if not IsMouseButtonDown("LeftButton") then return self:EndResize() end
 	local x = GetCursorPosition() / r.button:GetEffectiveScale()
-	local w = math.max(20, math.floor(r.startW + (x - r.startX)))
+	local w = math.min(1200, math.max(r.key == "name" and 60 or 20, math.floor(r.startW + (x - r.startX))))
 	if w ~= R.settings.columns.widths[r.key] then
 		R.settings.columns.widths[r.key] = w
 		self:ComputeColumns()
