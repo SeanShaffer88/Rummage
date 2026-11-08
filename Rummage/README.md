@@ -130,6 +130,9 @@ In the list: Up/Down/Page Up/Page Down/Home/End select a row, Enter uses the ite
 
 ## Mouse
 
+Drag the left, right or bottom edge to resize the window (up to 4000 x 2400); drag a bottom corner to scale it. Drag a column header's right edge to resize that column (Name too); double-click the edge to reset it.
+
+
 - Left/right-click, drag, Shift/Ctrl-click items exactly like Blizzard bags
 - Alt+click: cycle favorite · Alt+right-click: toggle junk
 - Bag icons: click = filter, right-click = empty, drag a bag onto a slot to equip it
