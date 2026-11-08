@@ -99,7 +99,13 @@ SlashCmdList.RUMMAGE = function(msg)
 		R:Print("settings string (also on the About tab in settings):")
 		print(R:ExportSettings())
 	elseif cmd == "apicheck" then
-		R.Extras:PrintApiCheck()
+		R.Extras:PrintApiCheck(rest:lower() == "export")
+	elseif cmd == "gold" then
+		R.Extras:PrintGold()
+	elseif cmd == "mail" then
+		R.Extras:MailWarnings(true)
+	elseif cmd == "perf" then
+		R.Extras:PrintPerf()
 	elseif cmd == "inventory" then
 		R.Extras:ShowInventory(rest ~= "" and rest:lower() or "csv")
 	elseif cmd == "autoprofile" then

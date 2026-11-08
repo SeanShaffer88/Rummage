@@ -1,4 +1,4 @@
--- Rummage: 1.5.0 extras — API self-check, inventory export, context auto-profiles.
+-- Rummage: extras — API self-check, inventory export, context auto-profiles (1.5.0); mail expiry, gold history, sell hint, perf (1.6.0).
 -- Copyright (C) 2026 Malikor. GPLv3 or later.
 
 local _, ns = ...
@@ -42,17 +42,156 @@ function Extras:ApiCheck()
 	return out, missing
 end
 
-function Extras:PrintApiCheck()
+function Extras:PrintApiCheck(export)
 	local res, missing = self:ApiCheck()
-	local version, build = "?", "?"
-	if GetBuildInfo then version, build = GetBuildInfo() end
-	R:Print(format("API check on client %s (build %s):", tostring(version), tostring(build)))
+	local version, build, _, iface = "?", "?", nil, "?"
+	if GetBuildInfo then version, build, _, iface = GetBuildInfo() end
+	local lines = { format("Rummage API check - client %s build %s interface %s", tostring(version), tostring(build), tostring(iface)) }
+	if not export then R:Print(format("API check on client %s (build %s):", tostring(version), tostring(build))) end
 	for _, r in ipairs(res) do
-		local tag = r.present and "|cff40ff40ok|r" or (r.required and "|cffff4040MISSING|r" or "|cffffa040absent|r")
-		R:Print(format("  %s  %s%s", tag, r.name, r.required and "" or " (optional)"))
+		local plain = format("  %-8s %s%s", r.present and "ok" or (r.required and "MISSING" or "absent"), r.name, r.required and "" or " (optional)")
+		lines[#lines + 1] = plain
+		if not export then
+			local tag = r.present and "|cff40ff40ok|r" or (r.required and "|cffff4040MISSING|r" or "|cffffa040absent|r")
+			R:Print(format("  %s  %s%s", tag, r.name, r.required and "" or " (optional)"))
+		end
 	end
-	R:Print(missing == 0 and "All required APIs present." or (missing .. " required API(s) missing — please report this output."))
+	local summary = missing == 0 and "All required APIs present." or (missing .. " required API(s) missing - please report this output.")
+	lines[#lines + 1] = summary
+	if export then
+		R.UI:ShowTextWindow("Rummage API check - Ctrl+C to copy", table.concat(lines, "\n"))
+	else
+		R:Print(summary)
+	end
 	return missing
+end
+
+---------------------------------------------------------------------------
+-- Mail expiry warnings (1.6.0): the mailbox is only readable at a mailbox, so
+-- Rummage stores each item's days-left when it last saw the mail and ages it.
+---------------------------------------------------------------------------
+-- Returns { {char=, items=n, days=d}, ... } for mail expiring within `within` days.
+function Extras:ExpiringMail(within)
+	local out, now = {}, time()
+	for _, entry in ipairs(R.Data:SortedChars()) do
+		local c = entry.c
+		if c.mailT and c.mail then
+			local minDays, n
+			for _, m in ipairs(c.mail) do
+				if type(m.d) == "number" then
+					local left = m.d - (now - c.mailT) / 86400
+					if left <= within then
+						n = (n or 0) + 1
+						if not minDays or left < minDays then minDays = left end
+					end
+				end
+			end
+			if n then out[#out + 1] = { char = c.name or entry.key, items = n, days = minDays } end
+		end
+	end
+	return out
+end
+
+function Extras:MailWarnings(force)
+	local within = R.settings.mailWarnDays or 0
+	if force and within <= 0 then within = 3 end
+	if within <= 0 then return 0 end
+	local list = self:ExpiringMail(within)
+	for _, e in ipairs(list) do
+		local when = e.days <= 0 and "may already have expired" or format("expires in %.1f days", e.days)
+		R:Print(format("|cffffa040Mail on %s:|r %d item%s, soonest %s.", e.char, e.items, e.items == 1 and "" or "s", when))
+	end
+	if force and #list == 0 then R:Print("No cached mail is close to expiring.") end
+	return #list
+end
+
+---------------------------------------------------------------------------
+-- Gold history (1.6.0): one snapshot per character per day, 90 days kept.
+---------------------------------------------------------------------------
+function Extras:RecordGold()
+	if not R.settings.goldHistory or not R.Data.me then return end
+	local c = R.Data.me
+	c.goldLog = c.goldLog or {}
+	local day = math.floor(time() / 86400)
+	local last = c.goldLog[#c.goldLog]
+	local money = GetMoney()
+	if last and last.d == day then last.m = money
+	else c.goldLog[#c.goldLog + 1] = { d = day, m = money } end
+	while #c.goldLog > 90 do table.remove(c.goldLog, 1) end
+end
+
+-- Money `days` ago (nearest snapshot at or before that day), or nil.
+local function MoneyAt(c, days)
+	if not c.goldLog then return nil end
+	local target = math.floor(time() / 86400) - days
+	local best
+	for _, e in ipairs(c.goldLog) do
+		if e.d <= target then best = e end
+	end
+	return best and best.m or nil
+end
+
+function Extras:GoldReport()
+	local rows, total, t7, t30, have7, have30 = {}, 0, 0, 0, false, false
+	for _, entry in ipairs(R.Data:SortedChars()) do
+		local c = entry.c
+		local now = c.money or 0
+		total = total + now
+		local m7, m30 = MoneyAt(c, 7), MoneyAt(c, 30)
+		if m7 then t7 = t7 + (now - m7); have7 = true end
+		if m30 then t30 = t30 + (now - m30); have30 = true end
+		local function delta(m) return m and (now - m >= 0 and "+" or "-") .. R.FormatMoney(math.abs(now - m), true) or "n/a" end
+		rows[#rows + 1] = format("%s: %s  (7d %s, 30d %s)", c.name or entry.key, R.FormatMoney(now, true), delta(m7), delta(m30))
+	end
+	rows[#rows + 1] = format("All characters: %s  (7d %s, 30d %s)", R.FormatMoney(total, true),
+		have7 and ((t7 >= 0 and "+" or "-") .. R.FormatMoney(math.abs(t7), true)) or "n/a",
+		have30 and ((t30 >= 0 and "+" or "-") .. R.FormatMoney(math.abs(t30), true)) or "n/a")
+	return rows
+end
+
+function Extras:PrintGold()
+	for _, line in ipairs(self:GoldReport()) do R:Print(line) end
+end
+
+---------------------------------------------------------------------------
+-- Sell hint (1.6.0): vendor or auction house, per unit, from Auctionator.
+---------------------------------------------------------------------------
+function Extras:SellHint(link)
+	if not (R.settings and R.settings.sellHint) or not R.Integrations.active.Auctionator then return nil end
+	local A = _G.Auctionator
+	local api = A and A.API and A.API.v1
+	if not (api and api.GetAuctionPriceByItemLink) or not R.API.GetItemInfo then return nil end
+	local okI, _, _, _, _, _, _, _, _, _, _, sell = pcall(R.API.GetItemInfo, link)
+	local okP, ah = pcall(api.GetAuctionPriceByItemLink, "Rummage", link)
+	if not (okI and okP) or type(sell) ~= "number" or type(ah) ~= "number" or sell <= 0 or ah <= 0 then return nil end
+	-- Raw prices only: the auction house cut and deposit are not modelled.
+	local better = ah > sell and "Auction House" or "Vendor"
+	return format("Sell: vendor %s · AH %s → %s", R.FormatMoney(sell, true), R.FormatMoney(ah, true), better)
+end
+
+---------------------------------------------------------------------------
+-- /rum perf: cost of a full window refresh and of an inventory scan.
+---------------------------------------------------------------------------
+function Extras:PrintPerf()
+	local clock = _G.debugprofilestop
+	if not clock then R:Print("Perf needs debugprofilestop, which this client lacks."); return end
+	local t0 = clock()
+	if R.UI and R.UI.frame and R.UI.frame:IsShown() then R.UI:Refresh() end
+	local t1 = clock()
+	R.Data:ScanInventory()
+	local t2 = clock()
+	R:Print(format("Perf: window refresh %.2f ms%s, inventory scan %.2f ms.", t1 - t0,
+		(R.UI and R.UI.frame and R.UI.frame:IsShown()) and "" or " (window closed: skipped)", t2 - t1))
+	local getMem = (C_AddOns and C_AddOns.GetAddOnMemoryUsage) or _G.GetAddOnMemoryUsage
+	local upd = (C_AddOns and C_AddOns.UpdateAddOnMemoryUsage) or _G.UpdateAddOnMemoryUsage
+	if getMem then
+		if upd then pcall(upd) end
+		local ok, kb = pcall(getMem, "Rummage")
+		if ok and type(kb) == "number" then R:Print(format("Perf: addon memory %.0f KB.", kb)) end
+	end
+	local chars = 0
+	for _ in pairs(R.db.chars) do chars = chars + 1 end
+	R:Print(format("Perf: %d cached character%s.", chars, chars == 1 and "" or "s"))
 end
 
 ---------------------------------------------------------------------------
@@ -182,6 +321,12 @@ function Extras:ApplyContext()
 end
 
 function Extras:Init()
+	-- gold snapshot at login and (batched) whenever money changes; mail warning once per login
+	self:RecordGold()
+	R:Listen("MONEY_CHANGED", function() R:Defer("goldlog", function() Extras:RecordGold() end) end)
+	if C_Timer and C_Timer.After then
+		C_Timer.After(8, function() Extras:MailWarnings(false) end)
+	end
 	local function trigger() R:Defer("autoprofile", function() Extras:ApplyContext() end) end
 	R:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED", trigger)
 	R:RegisterEvent("PLAYER_ENTERING_WORLD", trigger)

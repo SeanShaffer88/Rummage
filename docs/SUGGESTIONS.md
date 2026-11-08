@@ -51,3 +51,22 @@ Status key: Done / Partial / Skipped, with reason. Nothing was verified in the g
 ## Engineering
 20. **Split `UI.lua`** into header / list / grid / footer modules; makes combat-deferred layout code testable.
    - **Status:** Done — `UI_Window.lua`, `UI_Menus.lua`, `UI_Input.lua` split out (not header/list/grid/footer as proposed; those still share locals in `UI.lua`, which is now ~2.0k lines).
+
+## Second list (2026-11-08, after in-game verification)
+
+| Item | Status | Notes |
+|---|---|---|
+| In-game verification | Done | 1.5.0 verified live by SEAN on Forever 1.60.1.70862 (keyboard capture, buyback, spec detection included) |
+| Release | Done | cut by SEAN |
+| Real luacheck in CI | Skipped | SEAN: skip for now |
+| `apicheck` export | Done | `/rum apicheck export` |
+| CI release workflow | Done | `.github/workflows/{ci,release}.yml`, `tools/package.sh` |
+| Finish partials (#13, #16, #18) | Partial | `/rum buyback all` added; the secure-button split and a config UI for the auto-profile map stay as they were (`/rum autoprofile set` exists) |
+| Mail view and expiry | Done | days-left stored; login warning, `/rum mail` |
+| Gold over time | Done | `/rum gold` |
+| Bag-space warning | Already true | `lowSpaceWarn` (default 3) |
+| Reagent category rules | Already true | built-in categories, custom categories from searches |
+| Vendor vs auction hint | Done | tooltip line with Auctionator |
+| Compare tooltip for non-upgrades | Skipped | the game's own comparison tooltip already covers it |
+| CSV export | Already true | `/rum inventory csv` |
+| Performance budget | Done | `/rum perf` |
