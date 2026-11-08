@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.4.0 — 2026-11-08
+
+- New: **Scale grips in both bottom corners.** Drag either bottom corner to scale the whole window — frame, rows, grid icons, buttons and text — together (0.5 – 2.0). The opposite bottom corner and the top edge stay where they are. Refused while the window is locked or in combat; releasing saves the scale and position, and the Scale setting follows.
+- Changed: the old bottom-right size grip is now the right-edge (width) and bottom-edge (height) drag handles, so resizing the window still works. The footer moved right to clear the new left grip.
+- Compatibility: reviewed against Forever beta build 1.60.1.70862 (interface remains 16001). Container, item and bank access still goes through `Compat.lua`; no code changes were needed for the new build. Not tested in the client.
 ## 1.3.0 — 2026-10-20
 
 - New: **Profiles** — save the whole setup under a name (General settings) and re-apply it anywhere; optionally per-character, re-applied automatically at login.

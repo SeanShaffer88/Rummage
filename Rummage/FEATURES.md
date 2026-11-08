@@ -1,6 +1,6 @@
 # Rummage — Features
 
-The full feature list for Rummage 1.3.0 for WoW Forever
+The full feature list for Rummage 1.4.0 for WoW Forever
 (Interface 16001). For the short version see `README.md`; for
 store-listing copy see `DESCRIPTION.md`.
 
@@ -17,7 +17,7 @@ Rummage is by Malikor, GPLv3 or later.
   right-click a header to toggle).
 - Group by category, type, quality or bag, with collapsible group
   headers. Identical stacks can combine into one row.
-- Movable, resizable, scalable, lockable; opacity control.
+- Movable, lockable; opacity control. Drag either bottom corner to scale the whole window (1.4.0); drag the right or bottom edge to resize it.
 
 ## Finding things
 

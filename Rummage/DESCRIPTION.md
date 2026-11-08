@@ -66,6 +66,6 @@ Rummage is by Malikor, GPLv3 or later. It brings together the
 feature sets of Sorted and its plugins in a single addon, plus
 Baganator/Syndicator-style cross-character tracking.
 
-**Status note:** 1.3.0 is built but not yet verified in game;
+**Status note:** 1.4.0 is built but not yet verified in game;
 1.2.1 is the version verified live on Forever beta build
 1.60.1.70450.

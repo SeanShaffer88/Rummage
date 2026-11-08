@@ -323,7 +323,7 @@ end
 function UI:CreateFooter()
 	local f = self.frame
 	local foot = CreateFrame("Frame", nil, f)
-	foot:SetPoint("BOTTOMLEFT", PAD, PAD - 2)
+	foot:SetPoint("BOTTOMLEFT", PAD + 14, PAD - 2)
 	foot:SetPoint("BOTTOMRIGHT", -PAD - 14, PAD - 2)
 	foot:SetHeight(FOOTER_H - PAD)
 	self.footer = foot
@@ -371,20 +371,114 @@ function UI:CreateFooter()
 		return "Sells all junk to this merchant for " .. (R.FormatMoney(R.Junk:TotalValue()) ~= "" and R.FormatMoney(R.Junk:TotalValue()) or "nothing") .. "."
 	end)
 
-	-- resize grip
-	local grip = CreateFrame("Button", nil, f)
-	grip:SetSize(14, 14)
-	grip:SetPoint("BOTTOMRIGHT", -3, 3)
-	grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
-	grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
-	grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
-	grip:SetScript("OnMouseDown", function() if not R.settings.locked then f:StartSizing("BOTTOMRIGHT") end end)
-	grip:SetScript("OnMouseUp", function() f:StopMovingOrSizing(); UI:SavePosition(); UI:Layout() end)
+	-- Scale grips (1.4.0): drag either bottom corner to scale the whole window
+	-- (frame, rows, icons, text). The opposite bottom corner and the top edge
+	-- stay put on screen. Width/height are resized from the right/bottom edges.
+	local function MakeGrip(side)
+		local g = CreateFrame("Button", nil, f)
+		local right = side == "RIGHT"
+		g.side = side
+		g:SetSize(14, 14)
+		g:SetPoint(right and "BOTTOMRIGHT" or "BOTTOMLEFT", right and -3 or 3, 3)
+		g:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+		g:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+		g:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+		if not right then  -- mirror the art for the left corner
+			for _, tex in ipairs({ g:GetNormalTexture(), g:GetPushedTexture(), g:GetHighlightTexture() }) do
+				if tex and tex.SetTexCoord then tex:SetTexCoord(1, 0, 0, 1) end
+			end
+		end
+		g:SetScript("OnMouseDown", function(self, button)
+			if button == "LeftButton" then UI:BeginScale(self) end
+		end)
+		g:SetScript("OnMouseUp", function(self) UI:EndScale(self) end)
+		g:SetScript("OnEnter", function(self)
+			GameTooltip:SetOwner(self, right and "ANCHOR_RIGHT" or "ANCHOR_LEFT")
+			GameTooltip:AddLine("Drag to scale the window")
+			GameTooltip:Show()
+		end)
+		g:SetScript("OnLeave", function() GameTooltip:Hide() end)
+		return g
+	end
+	self.gripR, self.gripL = MakeGrip("RIGHT"), MakeGrip("LEFT")
+
+	-- Edge handles: right edge = width, bottom edge = height (the job the old
+	-- corner grip did). Kept clear of the corners so they never fight the grips.
+	local function MakeEdge(dir)
+		local e = CreateFrame("Button", nil, f)
+		if dir == "RIGHT" then
+			e:SetWidth(5)
+			e:SetPoint("TOPRIGHT", f, "TOPRIGHT", 0, -40)
+			e:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 20)
+		else
+			e:SetHeight(5)
+			e:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 20, 0)
+			e:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -20, 0)
+		end
+		e:SetScript("OnMouseDown", function(_, button)
+			if button == "LeftButton" and not R.settings.locked and not InCombatLockdown() then f:StartSizing(dir) end
+		end)
+		e:SetScript("OnMouseUp", function() f:StopMovingOrSizing(); UI:SavePosition(); UI:Layout() end)
+		e:SetScript("OnEnter", function(self)
+			GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
+			GameTooltip:AddLine(dir == "RIGHT" and "Drag to change the width" or "Drag to change the height")
+			GameTooltip:Show()
+		end)
+		e:SetScript("OnLeave", function() GameTooltip:Hide() end)
+	end
+	MakeEdge("RIGHT")
+	MakeEdge("BOTTOM")
 end
 
 ---------------------------------------------------------------------------
 -- Position, skin, layout
 ---------------------------------------------------------------------------
+-- Scale drag. Cursor-driven; the OnUpdate exists only while a grip is held.
+-- ns = horizontal cursor distance from the fixed bottom corner / unscaled width.
+-- The window is re-anchored TOPLEFT so the fixed corner and top edge hold still.
+function UI:BeginScale(g)
+	local f, s = self.frame, R.settings
+	if s.locked or InCombatLockdown() then return end
+	local sc = f:GetScale() or 1
+	local l, r, t = f:GetLeft(), f:GetRight(), f:GetTop()
+	if not (l and r and t) then return end
+	g.baseW = f:GetWidth()
+	g.fixedX = (g.side == "RIGHT") and l * sc or r * sc
+	g.fixedY = t * sc
+	g.sizing = true
+	g:SetScript("OnUpdate", function(self)
+		if InCombatLockdown() then return UI:EndScale(self) end
+		UI:ScaleStep(self)
+	end)
+end
+
+function UI:ScaleStep(g)
+	local f = self.frame
+	local cx = GetCursorPosition() / UIParent:GetEffectiveScale()
+	local w = g.baseW
+	if not w or w <= 0 then return end
+	local ns = (g.side == "RIGHT") and (cx - g.fixedX) / w or (g.fixedX - cx) / w
+	ns = max(0.5, min(2, ns))  -- same bounds as the scale setting
+	local left = (g.side == "RIGHT") and g.fixedX or (g.fixedX - w * ns)
+	R.settings.scale = ns
+	f:SetScale(ns)
+	f:ClearAllPoints()
+	f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left / ns, g.fixedY / ns)
+end
+
+function UI:EndScale(g)
+	if not g or not g.sizing then return end
+	g.sizing = false
+	g:SetScript("OnUpdate", nil)
+	local s = R.settings
+	s.scale = floor((s.scale or 1) * 100 + 0.5) / 100
+	if not InCombatLockdown() then
+		self.frame:SetScale(s.scale)
+		self:SavePosition()
+	end
+	if R.Options and R.Options.Rebuild then R.Options:Rebuild() end
+end
+
 function UI:ApplyPosition()
 	local f, s = self.frame, R.settings
 	f:ClearAllPoints()
@@ -434,7 +528,7 @@ function UI:Anchor()
 	self.sidebar:SetPoint("TOPLEFT", pad, -(HEADER_H + pad - 6))
 	self.sidebar:SetPoint("BOTTOMLEFT", pad, FOOTER_H + pad - 6)
 	self.footer:ClearAllPoints()
-	self.footer:SetPoint("BOTTOMLEFT", pad, pad - 2)
+	self.footer:SetPoint("BOTTOMLEFT", pad + 14, pad - 2)
 	self.footer:SetPoint("BOTTOMRIGHT", -pad - 14, pad - 2)
 end
 

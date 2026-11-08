@@ -17,7 +17,7 @@ Rummage puts every item you own into one sortable table: full item names, item l
 - Show, hide, reorder and resize columns (drag a header edge; right-click a header to toggle)
 - Group by category, type, quality or bag, with collapsible group headers
 - Combine identical stacks into one row
-- Movable, resizable, scalable, lockable; opacity control
+- Movable, lockable; opacity control; drag either bottom corner to scale the whole window, drag the right/bottom edge to resize it
 
 **Finding things**
 - Category sidebar: All, Favorites, New, Equipment, Consumables, Trade Goods, Recipes, Quest Items, Bags & Ammo, Keys, Miscellaneous, Junk — with live counts
