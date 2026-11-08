@@ -143,7 +143,7 @@ test("sanitizer repairs garbage and migrates a v3 database", function()
   local s, db = R.settings, R.db
   assert(s.scale == 2 and s.staleDays == 0 and s.sellConfirmValue == 0, "clamped / defaulted")
   assert(s.keyboardNav == true, "type repaired")
-  assert(s.viewSizes.evil == nil and s.viewSizes.bags.w == 400 and s.viewSizes.bags.h == 2000 and s.viewSizes.bags.scale == 2)
+  assert(s.viewSizes.evil == nil and s.viewSizes.bags.w == 400 and s.viewSizes.bags.h == 2400 and s.viewSizes.bags.scale == 2)
   assert(#db.savedSearches == 2 and #db.junkLog == 1 and db.contextProfiles.spec1 == "P" and db.contextProfiles.raid == nil)
   assert(db.version == 4, "version bumped")
   local n = 0
@@ -458,4 +458,24 @@ test("apicheck export opens a plain-text window; perf runs", function()
   R.Extras:PrintPerf()
   assert(chatHas(env, "Perf:"), "perf output missing")
   assert(not env.__errors, "errors: " .. tostring(env.__errors and env.__errors[1]))
+end)
+
+test("columns: a dragged Name width stops flexing; reset restores flex; limits allow wide windows", function()
+  local env, R = boot()
+  R.UI:Toggle()
+  R.UI:ComputeColumns()
+  local function nameW() for _, L in ipairs(R.UI.colLayout) do if L.col.key == "name" then return L.w end end end
+  local flexW = nameW()
+  assert(flexW and flexW >= 80, "name should flex")
+  R.settings.columns.widths.name = 150
+  R.UI:ComputeColumns()
+  assert(nameW() == 150, "explicit name width must hold, got " .. tostring(nameW()))
+  R.settings.columns.widths.name = nil
+  R.UI:ComputeColumns()
+  assert(nameW() == flexW, "reset must restore flex")
+  local _, R2 = boot(function(e)
+    e.RummageDB = { version = 4, settings = { width = 3900, height = 2300, columns = { order = {}, hidden = {}, widths = { name = 5000, ilvl = 90 } } } }
+  end)
+  assert(R2.settings.width == 3900 and R2.settings.height == 2300, "wide window must be allowed")
+  assert(R2.settings.columns.widths.name == 1200 and R2.settings.columns.widths.ilvl == 90, "column width cap is 1200")
 end)
