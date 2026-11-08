@@ -1,6 +1,6 @@
 # Rummage — Features
 
-The full feature list for Rummage 1.3.0 for WoW Forever
+The full feature list for Rummage 1.5.0 for WoW Forever
 (Interface 16001). For the short version see `README.md`; for
 store-listing copy see `DESCRIPTION.md`.
 
@@ -17,7 +17,7 @@ Rummage is by Malikor, GPLv3 or later.
   right-click a header to toggle).
 - Group by category, type, quality or bag, with collapsible group
   headers. Identical stacks can combine into one row.
-- Movable, resizable, scalable, lockable; opacity control.
+- Movable, lockable; opacity control. Drag either bottom corner to scale the whole window (1.4.0); drag the right or bottom edge to resize it. Shift-drag a grip to snap to 75/100/125/150%; a live percent shows while dragging; optional per-view size and scale (1.5.0).
 
 ## Finding things
 
@@ -142,12 +142,20 @@ custom price source, `tsm>` search), Pawn (upgrade arrow and %,
 `pawn>` search), Can I Mog It? (transmog status), Scrap (junk
 list), Syndicator (tooltip counts step aside).
 
+## New in 1.5.0
+
+Keyboard navigation in the list (arrows, Enter, Space), colourblind quality tags,
+stale-data dimming, saved-search chips, junk-sale log with buyback, sell
+confirmations, inventory CSV/text export, auto-profile by spec or zone type,
+upgrade popup stat diff, secret-value-safe tooltip reads, `/rum apicheck`.
+
 ## Commands
 
 `/rum` toggle bags · `/rum bank` · `/rum search <text>` ·
 `/rum config` · `/rum restack` · `/rum sell` · `/rum conflicts` ·
 `/rum keys` · `/rum upgrade` · `/rum export` · `/rum import` ·
-`/rum reset`. Diagnostics: `/fdebug` overlay and `/fdebug report`.
+`/rum apicheck` · `/rum inventory [csv|text]` · `/rum autoprofile` ·
+`/rum savesearch` · `/rum junklog` · `/rum buyback [n]` · `/rum reset`. Diagnostics: `/fdebug` overlay and `/fdebug report`.
 
 **Status note:** 1.3.0 is built but not yet verified in game;
 1.2.1 is the version verified live (Forever beta build

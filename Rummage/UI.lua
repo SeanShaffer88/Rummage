@@ -112,7 +112,8 @@ function UI:Create()
 	R:Listen("MOVER_CHANGED", function() UI:UpdateFooter() end)
 	R:RegisterEvent("PLAYER_REGEN_ENABLED", function()
 		if UI.pendingCombat then
-			UI.pendingCombat = false
+			UI:SetPending(false)
+			UI:ApplyViewLayout(UI:ViewKey())
 			R:RequestRefresh()
 		end
 	end)
@@ -323,7 +324,7 @@ end
 function UI:CreateFooter()
 	local f = self.frame
 	local foot = CreateFrame("Frame", nil, f)
-	foot:SetPoint("BOTTOMLEFT", PAD, PAD - 2)
+	foot:SetPoint("BOTTOMLEFT", PAD + 14, PAD - 2)
 	foot:SetPoint("BOTTOMRIGHT", -PAD - 14, PAD - 2)
 	foot:SetHeight(FOOTER_H - PAD)
 	self.footer = foot
@@ -371,46 +372,12 @@ function UI:CreateFooter()
 		return "Sells all junk to this merchant for " .. (R.FormatMoney(R.Junk:TotalValue()) ~= "" and R.FormatMoney(R.Junk:TotalValue()) or "nothing") .. "."
 	end)
 
-	-- resize grip
-	local grip = CreateFrame("Button", nil, f)
-	grip:SetSize(14, 14)
-	grip:SetPoint("BOTTOMRIGHT", -3, 3)
-	grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
-	grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
-	grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
-	grip:SetScript("OnMouseDown", function() if not R.settings.locked then f:StartSizing("BOTTOMRIGHT") end end)
-	grip:SetScript("OnMouseUp", function() f:StopMovingOrSizing(); UI:SavePosition(); UI:Layout() end)
+	self:CreateGrips()
 end
 
 ---------------------------------------------------------------------------
 -- Position, skin, layout
 ---------------------------------------------------------------------------
-function UI:ApplyPosition()
-	local f, s = self.frame, R.settings
-	f:ClearAllPoints()
-	f:SetSize(s.width, s.height)
-	f:SetScale(s.scale)
-	if s.point then
-		f:SetPoint(s.point[1], UIParent, s.point[2], s.point[3], s.point[4])
-	else
-		f:SetPoint("RIGHT", UIParent, "RIGHT", -80, 0)
-	end
-end
-
-function UI:SavePosition()
-	local f, s = self.frame, R.settings
-	local p, _, rp, x, y = f:GetPoint()
-	s.point = { p, rp, x, y }
-	s.width, s.height = math.floor(f:GetWidth() + 0.5), math.floor(f:GetHeight() + 0.5)
-end
-
-function UI:ResetPosition()
-	R.settings.point = nil
-	R.settings.width, R.settings.height = R.defaults.width, R.defaults.height
-	self:ApplyPosition()
-	self:Layout()
-end
-
 function UI:ApplySkin()
 	W:InvalidateTheme()
 	local skin = W:Skin()
@@ -434,7 +401,7 @@ function UI:Anchor()
 	self.sidebar:SetPoint("TOPLEFT", pad, -(HEADER_H + pad - 6))
 	self.sidebar:SetPoint("BOTTOMLEFT", pad, FOOTER_H + pad - 6)
 	self.footer:ClearAllPoints()
-	self.footer:SetPoint("BOTTOMLEFT", pad, pad - 2)
+	self.footer:SetPoint("BOTTOMLEFT", pad + 14, pad - 2)
 	self.footer:SetPoint("BOTTOMRIGHT", -pad - 14, pad - 2)
 end
 
@@ -692,7 +659,7 @@ function UI:Refresh()
 		return
 	end
 	if InCombatLockdown() and self.protectedButtons then
-		self.pendingCombat = true
+		self:SetPending(true)
 		self:UpdateLive()
 		return
 	end
@@ -933,7 +900,16 @@ local function FallbackButtonScripts(btn)
 		if link and HandleModifiedItemClick and HandleModifiedItemClick(link) then return end
 		if button == "RightButton" then API.UseContainerItem(bag, slot) else API.PickupContainerItem(bag, slot) end
 	end)
-	btn:SetScript("OnDragStart", function(self) API.PickupContainerItem(bs(self)) end)
+	btn:SetScript("OnDragStart", function(self)
+		local bag, slot = bs(self)
+		-- 1.5.0: Shift-drag splits a stack in half onto the cursor (fallback buttons only;
+		-- the secure Blizzard template already splits on Shift-click).
+		if IsShiftKeyDown and IsShiftKeyDown() and API.SplitContainerItem then
+			local _, count = API.GetSlotInfo(bag, slot)
+			if count and count > 1 then return API.SplitContainerItem(bag, slot, math.floor(count / 2)) end
+		end
+		API.PickupContainerItem(bag, slot)
+	end)
 	btn:SetScript("OnReceiveDrag", function(self) API.PickupContainerItem(bs(self)) end)
 	btn:SetScript("OnEnter", function(self)
 		local bag, slot = bs(self)
@@ -1464,7 +1440,7 @@ end
 function UI:Render()
 	if not self.frame or not self.frame:IsShown() then return end
 	if InCombatLockdown() and self.protectedButtons then
-		self.pendingCombat = true
+		self:SetPending(true)
 		return
 	end
 	local s = R.settings
@@ -1507,6 +1483,7 @@ function UI:Render()
 				self:SetupHeaderRow(row, d)
 			else
 				self:SetupItemRow(row, d, self.offset + i, interactive)
+				if d == self.selected then self:Highlight(row, true) end
 				if interactive then self:AttachButton(row, d, row:GetFrameLevel() + 3) end
 			end
 		end
@@ -1574,6 +1551,48 @@ end
 ---------------------------------------------------------------------------
 -- Sidebar & chips
 ---------------------------------------------------------------------------
+-- Saved searches (1.5.0): chips above the "+ New category" button. Left-click
+-- runs the search, right-click removes it. Returns the height they occupy.
+UI.savedButtons = {}
+function UI:UpdateSavedSearches(compact)
+	for _, b in ipairs(self.savedButtons) do b:Hide() end
+	local saved = R.db and R.db.savedSearches or {}
+	if compact or #saved == 0 then return 0 end
+	for i, q in ipairs(saved) do
+		local b = self.savedButtons[i]
+		if not b then
+			b = W:Button(self.sidebar, "", SIDEBAR_W - 8, 18, function(btn, button)
+				if button == "RightButton" then
+					table.remove(R.db.savedSearches, btn.index)
+					UI:UpdateSidebar()
+				else
+					UI.searchBox:SetText(btn.query)
+				end
+			end)
+			if b.RegisterForClicks then b:RegisterForClicks("LeftButtonUp", "RightButtonUp") end
+			self.savedButtons[i] = b
+		end
+		b.index, b.query = i, q
+		b:SetLabel("|cffd9a441*|r " .. q)
+		b:ClearAllPoints()
+		b:SetPoint("BOTTOM", self.sidebar, "BOTTOM", 0, 26 + (#saved - i) * 20)
+		W:SetTooltip(b, "Saved search", "Click to run: " .. q .. "\nRight-click to remove.")
+		b:Show()
+	end
+	return #saved * 20 + 4
+end
+
+function UI:SaveCurrentSearch()
+	local q = self.search and self.search:match("^%s*(.-)%s*$")
+	if not q or q == "" then R:Print("Type a search first."); return false end
+	local saved = R.db.savedSearches
+	for _, v in ipairs(saved) do if v == q then return false end end
+	if #saved >= 8 then R:Print("Saved searches are full (8). Right-click one to remove it."); return false end
+	saved[#saved + 1] = q
+	self:UpdateSidebar()
+	return true
+end
+
 function UI:UpdateSidebar()
 	if not R.settings.showSidebar then return end
 	local compact = R.settings.compactSidebar
@@ -1588,7 +1607,8 @@ function UI:UpdateSidebar()
 	for _, b in ipairs(self.catButtons) do b:Hide() end
 	local width = compact and SIDEBAR_COMPACT_W or SIDEBAR_W
 	local bh = 22
-	local avail = (self.sidebar:GetHeight() or 300) - (compact and 6 or 30)
+	local savedH = self:UpdateSavedSearches(compact)
+	local avail = (self.sidebar:GetHeight() or 300) - (compact and 6 or 30) - savedH
 	local maxVisible = math.max(1, math.floor(avail / bh))
 	local maxOff = math.max(0, #cats - maxVisible)
 	self.catOffset = math.min(self.catOffset or 0, maxOff)
@@ -1712,7 +1732,9 @@ end
 
 function UI:SetView(view)
 	if self.view == view then return end
+	self:SaveViewLayout(self:ViewKey())
 	self.view = view
+	self:ApplyViewLayout(self:ViewKey())
 	self.bagFilter = nil
 	self.offset = 0
 	R:RequestRefresh()
@@ -1846,6 +1868,14 @@ function UI:UpdateFooter()
 	elseif self.view == "bank" and not R.Data.atBank then
 		cachedMsg = R.L.cachedBank
 	end
+	local stale = not self:IsMe() and R.IsStale(c)
+	if stale then
+		cachedMsg = cachedMsg .. " (stale)"
+		self.cachedText:SetTextColor(0.85, 0.4, 0.4)
+	else
+		self.cachedText:SetTextColor(0.6, 0.6, 0.6)
+	end
+	if self.list then self.list:SetAlpha(stale and 0.6 or 1) end
 	self.cachedText:SetText(cachedMsg)
 
 	-- Vendor value of everything currently listed (after filters), with the
@@ -1946,320 +1976,6 @@ function UI:DropCursorItem()
 			end
 		end
 	end
-end
-
----------------------------------------------------------------------------
--- Menus & popups
----------------------------------------------------------------------------
----------------------------------------------------------------------------
--- Search history, sort presets, cross-character search
----------------------------------------------------------------------------
-function UI:RecordSearch(text)
-	text = text and text:match("^%s*(.-)%s*$")
-	if not text or text == "" then return end
-	local h = R.db.searchHistory
-	if not h then return end
-	for i = #h, 1, -1 do
-		if h[i] == text then table.remove(h, i) end
-	end
-	table.insert(h, 1, text)
-	while #h > 10 do table.remove(h) end
-end
-
-function UI:ShowHistoryMenu(anchor)
-	local items = { { text = "Recent searches", isTitle = true } }
-	local h = R.db.searchHistory or {}
-	if #h == 0 then
-		items[#items + 1] = { text = "(none yet)", disabled = true }
-	end
-	for _, q in ipairs(h) do
-		items[#items + 1] = { text = q, func = function() UI.searchBox:SetText(q) end }
-	end
-	if #h > 0 then
-		items[#items + 1] = { text = "Clear history", func = function() wipe(R.db.searchHistory) end }
-	end
-	W:Menu(anchor, items)
-end
-
-function UI:ShowPresetMenu(anchor)
-	local s = R.settings
-	local items = { { text = "Sort presets", isTitle = true } }
-	local presets = R.db.sortPresets or {}
-	if #presets == 0 then
-		items[#items + 1] = { text = "(none saved)", disabled = true }
-	end
-	for i, pr in ipairs(presets) do
-		items[#items + 1] = {
-			text = pr.name,
-			checked = s.sortKey == pr.sortKey and s.sortAsc == pr.sortAsc
-				and s.groupBy == pr.groupBy and s.viewMode == pr.viewMode,
-			func = function()
-				s.sortKey, s.sortAsc = pr.sortKey, pr.sortAsc
-				s.groupBy, s.viewMode = pr.groupBy, pr.viewMode
-				s.favoritesFirst, s.newFirst = pr.favoritesFirst, pr.newFirst
-				UI.offset = 0
-				UI:Layout()
-			end,
-			onDelete = function()
-				table.remove(R.db.sortPresets, i)
-				R:Print("Preset '" .. pr.name .. "' deleted.")
-			end,
-		}
-	end
-	items[#items + 1] = { text = "Save current as preset...", func = function()
-		StaticPopup_Show("RUMMAGE_NEW_PRESET")
-	end }
-	W:Menu(anchor, items)
-end
-
--- Snapshot entries for every character (cross-character search). Items:Build
--- recycles its pooled entries on the next call, so matching data is copied
--- into plain tables here; the copies are only ever displayed, never acted on
--- (Render forces interactive=false while this mode is active).
-function UI:BuildAllChars(view)
-	local out = {}
-	local Items = R.Items
-	for _, entry in ipairs(R.Data:SortedChars()) do
-		local c = entry.c
-		local built = Items:Build(c, view)
-		for i = 1, #built do
-			local e = built[i]
-			Items:Prepare(e, c, c == R.Data.me, false)
-			local slotsCopy = {}
-			for j = 1, #e.slots do slotsCopy[j] = { e.slots[j][1], e.slots[j][2] } end
-			out[#out + 1] = {
-				link = e.link, id = e.id, count = e.count, bag = e.bag, slot = e.slot,
-				slots = slotsCopy, icon = e.icon, q = e.q, bound = e.bound,
-				info = e.info, name = e.name, lname = e.lname, quality = e.quality,
-				fav = e.fav, new = e.new, acquired = e.acquired, junk = e.junk,
-				owner = c.name, foreign = c ~= R.Data.me, vals = {},
-			}
-		end
-	end
-	return out
-end
-
-function UI:ShowCharMenu(anchor)
-	local items = { { text = "Characters", isTitle = true } }
-	local current = self:Char()
-	for _, entry in ipairs(R.Data:SortedChars()) do
-		local c = entry.c
-		local label = R.ClassColorText(c.class, c.name or entry.key)
-		if c.realm ~= GetRealmName() then label = label .. " |cff888888- " .. (c.realm or "?") .. "|r" end
-		if c.level then label = label .. " |cff888888(" .. c.level .. ")|r" end
-		local item = {
-			text = label, checked = c == current,
-			func = function()
-				UI.charKey = (entry.key ~= R.charKey) and entry.key or nil
-				UI.offset = 0
-				UI.bagFilter = nil
-				R:RequestRefresh()
-			end,
-		}
-		if entry.key ~= R.charKey then
-			item.onDelete = function()
-				StaticPopup_Show("RUMMAGE_DELETE_CHAR", entry.key, nil, entry.key)
-			end
-		end
-		items[#items + 1] = item
-	end
-	W:Menu(anchor, items)
-end
-
-function UI:ShowCategoryMenu(anchor, cat)
-	local idx = cat.custom
-	W:Menu(anchor, {
-		{ text = cat.name, isTitle = true },
-		{ text = "Edit filter...", func = function() StaticPopup_Show("RUMMAGE_EDIT_CATEGORY", cat.name, nil, idx) end },
-		{ text = "Rename...", func = function() StaticPopup_Show("RUMMAGE_RENAME_CATEGORY", cat.name, nil, idx) end },
-		{ text = "Use current search as filter", func = function()
-			R.db.categories[idx].query = UI.search
-			R:RequestRefresh()
-		end },
-		{ text = "Move up", func = function() R.Categories:MoveCustom(idx, -1); R:RequestRefresh() end },
-		{ text = "Move down", func = function() R.Categories:MoveCustom(idx, 1); R:RequestRefresh() end },
-		{ text = "|cffff6060Delete|r", func = function()
-			R.Categories:RemoveCustom(idx)
-			if UI.category == cat.id then UI:SetCategory("all") end
-			R:RequestRefresh()
-		end },
-	}, "TOPLEFT", "TOPRIGHT", 2, 0)
-end
-
-function UI:PromptNewCategory()
-	StaticPopup_Show("RUMMAGE_NEW_CATEGORY")
-end
-
-local function EditBoxOf(dialog)
-	return dialog.editBox or dialog.EditBox or (dialog.GetName and _G[dialog:GetName() .. "EditBox"])
-end
-
-function UI:RegisterPopups()
-	StaticPopupDialogs["RUMMAGE_NEW_CATEGORY"] = {
-		text = "Name for the new category?\n(Its filter will be the current search: \"%s\")",
-		button1 = ACCEPT, button2 = CANCEL, hasEditBox = true, maxLetters = 40,
-		OnShow = function(self)
-			local eb = EditBoxOf(self)
-			if eb then eb:SetText(""); eb:SetFocus() end
-		end,
-		OnAccept = function(self)
-			local eb = EditBoxOf(self)
-			local name = eb and eb:GetText() or ""
-			if name ~= "" then
-				local idx = R.Categories:AddCustom(name, UI.search)
-				UI:SetCategory("custom" .. idx)
-				R:RequestRefresh()
-			end
-		end,
-		EditBoxOnEnterPressed = function(self)
-			local p = self:GetParent()
-			StaticPopupDialogs["RUMMAGE_NEW_CATEGORY"].OnAccept(p)
-			p:Hide()
-		end,
-		EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
-		timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
-	}
-	StaticPopupDialogs["RUMMAGE_EDIT_CATEGORY"] = {
-		text = "Filter for %s:",
-		button1 = ACCEPT, button2 = CANCEL, hasEditBox = true, maxLetters = 200,
-		OnShow = function(self, idx)
-			local eb = EditBoxOf(self)
-			local def = R.db.categories[idx]
-			if eb and def then eb:SetText(def.query or ""); eb:SetFocus(); eb:HighlightText() end
-		end,
-		OnAccept = function(self, idx)
-			local eb = EditBoxOf(self)
-			if eb and R.db.categories[idx] then
-				R.db.categories[idx].query = eb:GetText() or ""
-				R:RequestRefresh()
-			end
-		end,
-		EditBoxOnEnterPressed = function(self)
-			local p = self:GetParent()
-			StaticPopupDialogs["RUMMAGE_EDIT_CATEGORY"].OnAccept(p, p.data)
-			p:Hide()
-		end,
-		EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
-		timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
-	}
-	StaticPopupDialogs["RUMMAGE_RENAME_CATEGORY"] = {
-		text = "Rename %s:",
-		button1 = ACCEPT, button2 = CANCEL, hasEditBox = true, maxLetters = 40,
-		OnShow = function(self, idx)
-			local eb = EditBoxOf(self)
-			local def = R.db.categories[idx]
-			if eb and def then eb:SetText(def.name or ""); eb:SetFocus(); eb:HighlightText() end
-		end,
-		OnAccept = function(self, idx)
-			local eb = EditBoxOf(self)
-			local name = eb and eb:GetText() or ""
-			if name ~= "" and R.db.categories[idx] then
-				R.db.categories[idx].name = name
-				R:RequestRefresh()
-			end
-		end,
-		EditBoxOnEnterPressed = function(self)
-			local p = self:GetParent()
-			StaticPopupDialogs["RUMMAGE_RENAME_CATEGORY"].OnAccept(p, p.data)
-			p:Hide()
-		end,
-		EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
-		timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
-	}
-	StaticPopupDialogs["RUMMAGE_DELETE_CHAR"] = {
-		text = "Forget all cached data for %s?",
-		button1 = YES, button2 = NO,
-		OnAccept = function(_, key)
-			R.db.chars[key] = nil
-			if UI.charKey == key then UI.charKey = nil end
-			R:Fire("DATA_CHANGED")
-		end,
-		timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
-	}
-	StaticPopupDialogs["RUMMAGE_CONFIRM_TRANSFER"] = {
-		text = "Move EVERY listed item to your %s?",
-		button1 = YES, button2 = NO,
-		OnAccept = function()
-			UI.transferConfirmed = true
-			UI:DoTransfer()
-		end,
-		timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
-	}
-	StaticPopupDialogs["RUMMAGE_BUY_BANK_SLOT"] = {
-		text = "Purchase the next bank bag slot?",
-		button1 = YES, button2 = NO,
-		OnShow = function(self)
-			local cost = GetBankSlotCost and GetBankSlotCost((GetNumBankSlots and GetNumBankSlots()) or 0)
-			local t = self.text or self.Text
-			if t and cost then
-				t:SetText("Purchase the next bank bag slot for " .. R.FormatMoney(cost) .. "?")
-			end
-		end,
-		OnAccept = function()
-			if PurchaseSlot then PurchaseSlot() end
-		end,
-		timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
-	}
-	StaticPopupDialogs["RUMMAGE_NEW_PRESET"] = {
-		text = "Name for this sort preset?\n(It saves the current sort, grouping and view settings.)",
-		button1 = ACCEPT, button2 = CANCEL, hasEditBox = true, maxLetters = 40,
-		OnShow = function(self)
-			local eb = EditBoxOf(self)
-			if eb then eb:SetText(""); eb:SetFocus() end
-		end,
-		OnAccept = function(self)
-			local eb = EditBoxOf(self)
-			local name = eb and eb:GetText() or ""
-			if name == "" then return end
-			local s = R.settings
-			for i, pr in ipairs(R.db.sortPresets) do
-				if pr.name == name then table.remove(R.db.sortPresets, i); break end
-			end
-			R.db.sortPresets[#R.db.sortPresets + 1] = {
-				name = name, sortKey = s.sortKey, sortAsc = s.sortAsc,
-				groupBy = s.groupBy, viewMode = s.viewMode,
-				favoritesFirst = s.favoritesFirst, newFirst = s.newFirst,
-			}
-			R:Print("Preset '" .. name .. "' saved.")
-		end,
-		EditBoxOnEnterPressed = function(self)
-			local p = self:GetParent()
-			StaticPopupDialogs["RUMMAGE_NEW_PRESET"].OnAccept(p)
-			p:Hide()
-		end,
-		EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
-		timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
-	}
-	StaticPopupDialogs["RUMMAGE_EXPORT_SETTINGS"] = {
-		text = "Your Rummage settings string (settings, columns, custom categories, auto-junk rules). Copy it somewhere safe:",
-		button1 = CLOSE, hasEditBox = true, maxLetters = 0,
-		OnShow = function(self)
-			local eb = EditBoxOf(self)
-			if eb then eb:SetText(R:ExportSettings()); eb:SetFocus(); eb:HighlightText() end
-		end,
-		timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
-	}
-	StaticPopupDialogs["RUMMAGE_IMPORT_SETTINGS"] = {
-		text = "Paste a Rummage settings string (RUM1;...). It replaces your settings, custom categories and auto-junk rules:",
-		button1 = ACCEPT, button2 = CANCEL, hasEditBox = true, maxLetters = 0,
-		OnShow = function(self)
-			local eb = EditBoxOf(self)
-			if eb then eb:SetText(""); eb:SetFocus() end
-		end,
-		OnAccept = function(self)
-			local eb = EditBoxOf(self)
-			local ok, err = R:ImportSettings(eb and eb:GetText() or "")
-			if ok then R:Print("Settings imported.")
-			else R:Print("Import failed: " .. tostring(err)) end
-		end,
-		EditBoxOnEnterPressed = function(self)
-			local p = self:GetParent()
-			StaticPopupDialogs["RUMMAGE_IMPORT_SETTINGS"].OnAccept(p)
-			p:Hide()
-		end,
-		EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
-		timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
-	}
 end
 
 ---------------------------------------------------------------------------

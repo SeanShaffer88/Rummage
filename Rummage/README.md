@@ -17,7 +17,7 @@ Rummage puts every item you own into one sortable table: full item names, item l
 - Show, hide, reorder and resize columns (drag a header edge; right-click a header to toggle)
 - Group by category, type, quality or bag, with collapsible group headers
 - Combine identical stacks into one row
-- Movable, resizable, scalable, lockable; opacity control
+- Movable, lockable; opacity control; drag either bottom corner to scale the whole window, drag the right/bottom edge to resize it
 
 **Finding things**
 - Category sidebar: All, Favorites, New, Equipment, Consumables, Trade Goods, Recipes, Quest Items, Bags & Ammo, Keys, Miscellaneous, Junk — with live counts
@@ -116,9 +116,13 @@ Rummage puts every item you own into one sortable table: full item names, item l
 
 ## Commands
 
-`/rum` toggle bags · `/rum bank` · `/rum search <text>` · `/rum config` · `/rum restack` · `/rum sell` · `/rum conflicts` · `/rum keys` · `/rum upgrade` (preview popup) · `/rum export` · `/rum import <string>` · `/rum reset`
+`/rum` toggle bags · `/rum bank` · `/rum search <text>` · `/rum config` · `/rum restack` · `/rum sell` · `/rum conflicts` · `/rum keys` · `/rum upgrade` (preview popup) · `/rum export` · `/rum import <string>` · `/rum apicheck` (which APIs this client has) · `/rum inventory [csv|text]` (copy every character's items) · `/rum autoprofile` (profile by spec/zone) · `/rum savesearch` · `/rum junklog` · `/rum buyback [n]` · `/rum reset`
 
 Diagnostics: `/fdebug` (or `/rum debug`) toggles an overlay with memory, frame time, event rates and timings · `/fdebug report` · `/fdebug reset`. See `AUDIT.md` for the performance report.
+
+## Keyboard (1.5.0)
+
+In the list: Up/Down/Page Up/Page Down/Home/End select a row, Enter uses the item, Space cycles its favorite marker. Disabled while the search box has focus and in combat (setting: General → Keyboard navigation). Drag a bottom corner to scale; hold Shift to snap to 75/100/125/150%.
 
 ## Mouse
 

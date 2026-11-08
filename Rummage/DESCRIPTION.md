@@ -64,8 +64,8 @@ items.
 
 Rummage is by Malikor, GPLv3 or later. It brings together the
 feature sets of Sorted and its plugins in a single addon, plus
-Baganator/Syndicator-style cross-character tracking.
+Baganator/Syndicator-style cross-character tracking. 1.5.0 adds keyboard navigation, saved searches, a junk-sale log with buyback, sell confirmations, inventory export, auto-profiles by spec/zone, an upgrade stat diff and `/rum apicheck`.
 
-**Status note:** 1.3.0 is built but not yet verified in game;
+**Status note:** 1.5.0 is built and passes its offline test suite (`tests/`) but is not yet verified in game; items marked *Unverified* in the changelog (keyboard capture, buyback, spec detection) need a live check. 1.4.0 is likewise unverified;
 1.2.1 is the version verified live on Forever beta build
 1.60.1.70450.

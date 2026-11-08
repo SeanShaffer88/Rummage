@@ -34,6 +34,8 @@ R:RegisterEventOnce("PLAYER_LOGIN", function()
 	R.Upgrade:Init()
 	R.UI:RegisterPopups()
 	R.UI:Create()
+	R.UI:SetupKeyboard()
+	R.Extras:Init()
 	R.Hooks:Init()
 	R.Options:Init()
 	R.Minimap:Init()
@@ -96,6 +98,18 @@ SlashCmdList.RUMMAGE = function(msg)
 	elseif cmd == "export" then
 		R:Print("settings string (also on the About tab in settings):")
 		print(R:ExportSettings())
+	elseif cmd == "apicheck" then
+		R.Extras:PrintApiCheck()
+	elseif cmd == "inventory" then
+		R.Extras:ShowInventory(rest ~= "" and rest:lower() or "csv")
+	elseif cmd == "autoprofile" then
+		R.Extras:Command(rest)
+	elseif cmd == "savesearch" then
+		if R.UI:SaveCurrentSearch() then R:Print("Search saved.") end
+	elseif cmd == "junklog" then
+		R.Junk:PrintLog()
+	elseif cmd == "buyback" then
+		R.Junk:Buyback(rest)
 	elseif cmd == "import" then
 		local ok, err = R:ImportSettings(rest)
 		if ok then R:Print("Settings imported.")

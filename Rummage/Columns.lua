@@ -93,7 +93,8 @@ function Columns:RegisterBuiltins()
 		value = function(e) return e.lname end,
 		text = function(e)
 			local _, _, _, hex = R.QualityColor(e.quality)
-			local s = hex .. e.name .. "|r"
+			local tag = R.QualityTag(e.quality)
+			local s = hex .. (tag ~= "" and (tag .. " ") or "") .. e.name .. "|r"
 			if e.new then s = s .. " |cff40ff40new|r" end
 			return s
 		end })

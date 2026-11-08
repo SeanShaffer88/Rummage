@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.5.0 — 2026-11-08
+
+Items marked *Unverified* depend on client behaviour I could not test; they are written defensively (existence checks + `pcall`) and degrade to doing nothing.
+
+- New: **`/rum apicheck`** — lists which container, item, tooltip, secret-value and buyback APIs this client provides, required vs optional.
+- Hardened: **secret-value safety** — tooltip item reads (counts, upgrade scan tooltip) go through `pcall` and `issecretvalue` / `canaccessvalue` guards and quietly skip when data is unreadable.
+- New: **Shift-snap on the scale grips** (75 / 100 / 125 / 150 %) and a **live percent readout** while a grip is held.
+- New: **Pending-layout badge** — a scale or layout change that has to wait for combat shows "Layout pending" and is applied when combat ends.
+- New: **Per-view window size and scale** (General settings) — Bags, Bank and other-character views each remember their own geometry.
+- New: **Keyboard navigation** — arrows, Page Up/Down, Home/End select a row; Enter uses the item; Space cycles its favorite marker. Off while typing in search and in combat; every other key is passed through. *Unverified* on Forever (`SetPropagateKeyboardInput`).
+- New: **Colourblind-safe quality tags** — optional `[Rare]` / `[Epic]` text before item names (Appearance).
+- New: **Stale-data cues** — other characters' menu entries show how long ago they were seen; data older than N days (default 14, 0 = off) is dimmed and marked "(stale)".
+- New: **Junk-sale log and buyback shortcut** — `/rum junklog`, `/rum buyback [n]` (matches the logged link against the merchant's buyback list). *Unverified* on Forever's buyback API.
+- New: **Sell safeguards** — a confirmation when a junk sale includes an Uncommon-or-better item (on by default) or is worth more than a gold threshold (off by default).
+- New: **Saved searches** — "Save current search" in the history menu or `/rum savesearch`; up to 8 appear as chips above "+ New category"; right-click removes.
+- New: **Inventory export** — `/rum inventory [csv|text]` opens a copy window with every cached character's bags, bank, equipped and mail.
+- New: **Auto-profile by context** — `/rum autoprofile on|off|set <spec1-4|dungeon|raid|battleground|arena|world> <profile>|clear <context>` re-applies saved profiles on spec or zone-type change, out of combat only. *Unverified* (spec API names on Forever).
+- New: **Upgrade popup stat diff** — "+12 Strength, -3 Stamina" versus the item you would replace, when the client provides item stats.
+- New: **Shift-drag splits a stack** on the plain (non-secure) item buttons. The secure Blizzard buttons already split on Shift-click.
+- New: **`/fdebug report` prints the bank path** (character bank tabs or legacy bank bags, with bag ids).
+- Saved data upgraded to v4 (saved searches, junk log, context profiles, per-view sizes; existing data untouched).
+- Under the hood: `UI.lua` is split into `UI.lua`, `UI_Window.lua` (scale/geometry), `UI_Menus.lua` (menus, popups, copy window) and `UI_Input.lua` (keyboard); the `UI` table is shared through `R.UI`. New `tests/` (Lua 5.1 + fake client) and `tools/check.py` gate script.
+
+## 1.4.0 — 2026-11-08
+
+- New: **Scale grips in both bottom corners.** Drag either bottom corner to scale the whole window — frame, rows, grid icons, buttons and text — together (0.5 – 2.0). The opposite bottom corner and the top edge stay where they are. Refused while the window is locked or in combat; releasing saves the scale and position, and the Scale setting follows.
+- Changed: the old bottom-right size grip is now the right-edge (width) and bottom-edge (height) drag handles, so resizing the window still works. The footer moved right to clear the new left grip.
+- Compatibility: reviewed against Forever beta build 1.60.1.70862 (interface remains 16001). Container, item and bank access still goes through `Compat.lua`; no code changes were needed for the new build. Not tested in the client.
 ## 1.3.0 — 2026-10-20
 
 - New: **Profiles** — save the whole setup under a name (General settings) and re-apply it anywhere; optionally per-character, re-applied automatically at login.
