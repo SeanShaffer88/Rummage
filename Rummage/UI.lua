@@ -10,8 +10,10 @@ local floor, max, min = math.floor, math.max, math.min
 local tsort = table.sort
 local InCombatLockdown = InCombatLockdown
 
-local UI = {}
-R.UI = UI
+-- 1.8.0: the window is a factory run once per window (Bags, Bank), so each gets its own
+-- state, frames and closures. UI_Boot.lua builds the instances; UI.kind is "bags" or "bank".
+R.UIParts = R.UIParts or {}
+R.UIParts[#R.UIParts + 1] = function(UI)
 
 -- Scratch tables reused by every Refresh (wiped, never reallocated).
 local scratchSearched, scratchInCat, scratchFinal = {}, {}, {}
@@ -33,7 +35,7 @@ local COIN_ICON = "Interface\\Icons\\INV_Misc_Coin_02"
 local UPGRADE_ICON = "Interface\\AddOns\\Pawn\\Textures\\UpgradeArrow"
 local SORT_ARROW = "Interface\\Buttons\\UI-SortArrow"
 
-UI.view = "bags"
+UI.view = UI.kind
 UI.category = "all"
 UI.search = ""
 UI.offset = 0
@@ -75,7 +77,8 @@ function UI:Create()
 	W:UpdateFonts()
 	local s = R.settings
 
-	local f = CreateFrame("Frame", "RummageFrame", UIParent, API.Backdrop)
+	local suffix = self.kind == "bank" and "Bank" or ""
+	local f = CreateFrame("Frame", "RummageFrame" .. suffix, UIParent, API.Backdrop)
 	self.frame = f
 	f:SetFrameStrata("MEDIUM")
 	f:SetToplevel(true)
@@ -94,7 +97,7 @@ function UI:Create()
 	f:SetScript("OnSizeChanged", function()
 		if f:IsShown() then R:Defer("layout", function() UI:Layout() end) end
 	end)
-	table.insert(UISpecialFrames, "RummageFrame")
+	table.insert(UISpecialFrames, "RummageFrame" .. suffix)
 
 	self.category = (s.rememberCategory and type(s.lastCategory) == "string") and s.lastCategory or "all"
 	self:CreateHeader()
@@ -147,6 +150,14 @@ function UI:CreateHeader()
 	self.tabBags:SetPoint("LEFT", charBtn, "RIGHT", 6, 0)
 	self.tabBank = W:Button(header, R.L.bank, 56, 22, function() UI:SetView("bank") end)
 	self.tabBank:SetPoint("LEFT", self.tabBags, "RIGHT", 2, 0)
+	-- One tab per window: Bags shows only "Bags", the Bank window only "Bank".
+	if self.kind == "bank" then
+		self.tabBags:Hide()
+		self.tabBank:ClearAllPoints()
+		self.tabBank:SetPoint("LEFT", charBtn, "RIGHT", 6, 0)
+	else
+		self.tabBank:Hide()
+	end
 
 	-- cross-character search toggle (applies while the search box has text)
 	local allBtn = W:Button(header, "All", 30, 22, function()
@@ -154,7 +165,7 @@ function UI:CreateHeader()
 		UI:UpdateTabs()
 		R:RequestRefresh()
 	end)
-	allBtn:SetPoint("LEFT", self.tabBank, "RIGHT", 6, 0)
+	allBtn:SetPoint("LEFT", self.kind == "bank" and self.tabBank or self.tabBags, "RIGHT", 6, 0)
 	W:SetTooltip(allBtn, "Search all characters",
 		"When on and you type a search, results come from every character's cached bags and bank. Results are view-only (no item actions) in this mode.")
 	self.allBtn = allBtn
@@ -386,7 +397,7 @@ function UI:ApplySkin()
 	W:Backdrop(self.sidebar, "flat", skin.panel, { 0, 0, 0, 0 })
 	W:Backdrop(self.colhead, "flat", skin.panel, { 0, 0, 0, 0 })
 	W:RefreshButtons()
-	self.frame:SetScale(R.settings.scale)
+	self.frame:SetScale(self:Geo().scale)
 	W:UpdateFonts()
 	if self.frame:IsShown() then self:Layout() end
 end
@@ -1755,7 +1766,7 @@ function UI:UpdateTabs()
 end
 
 function UI:SetView(view)
-	if self.view == view then return end
+	if self.view == view or view ~= self.kind then return end
 	self:SaveViewLayout(self:ViewKey())
 	self.view = view
 	self:ApplyViewLayout(self:ViewKey())
@@ -1796,7 +1807,7 @@ end
 
 local function BagButtonOnClick(self, button)
 	if self.locked then
-		if R.Data.atBank and UI:IsMe() then StaticPopup_Show("RUMMAGE_BUY_BANK_SLOT") end
+		if R.Data.atBank and UI:IsMe() then R.popupUI = UI; StaticPopup_Show("RUMMAGE_BUY_BANK_SLOT") end
 		return
 	end
 	if UI:Interactive() and (CursorHasItem and CursorHasItem()) then
@@ -1967,7 +1978,7 @@ end
 function UI:DoTransfer()
 	if not R.Data.atBank or self.searchAllActive then return end
 	if self.bagFilter == nil and self.search == "" and self.category == "all" and not self.transferConfirmed then
-		StaticPopup_Show("RUMMAGE_CONFIRM_TRANSFER", self.view == "bank" and "bags" or "bank")
+		R.popupUI = UI; StaticPopup_Show("RUMMAGE_CONFIRM_TRANSFER", self.view == "bank" and "bags" or "bank")
 		return
 	end
 	self.transferConfirmed = nil
@@ -2035,11 +2046,7 @@ end
 ---------------------------------------------------------------------------
 -- Open / close
 ---------------------------------------------------------------------------
-function UI:Open(view)
-	if view then
-		if view ~= self.view then self.bagFilter = nil; self.offset = 0 end
-		self.view = view
-	end
+function UI:Open()
 	if not self.frame:IsShown() then
 		self.frame:Show()
 	else
@@ -2051,8 +2058,8 @@ function UI:Close()
 	self.frame:Hide()
 end
 
-function UI:Toggle(view)
-	if self.frame:IsShown() and (not view or view == self.view) then
+function UI:Toggle()
+	if self.frame:IsShown() then
 		self:Close()
 	else
 		self:Open(view)
@@ -2075,8 +2082,10 @@ function UI:OnHide()
 	if SOUNDKIT and SOUNDKIT.IG_BACKPACK_CLOSE then PlaySound(SOUNDKIT.IG_BACKPACK_CLOSE) end
 	if R.settings.clearNewOnClose then R.Data:ClearNew() end
 	self.searchBox:ClearFocus()
-	if R.Data.atBank and R.settings.replaceBank and CloseBankFrame then
+	-- Only the Bank window closes the banker; hiding Bags leaves the bank open.
+	if self.kind == "bank" and R.Data.atBank and R.settings.replaceBank and CloseBankFrame then
 		CloseBankFrame()
 	end
 	R:Fire("FRAME_HIDDEN")
+end
 end

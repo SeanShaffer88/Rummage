@@ -109,21 +109,61 @@ test("per-view layouts are remembered when enabled", function()
   local env, R = boot()
   open(env, R)
   local UI, f = R.UI, R.UI.frame
-  R.settings.perViewSize = true
-  f:SetSize(800, 600); f:SetScale(1.2)
-  R.settings.scale = 1.2
-  UI:SavePosition()          -- stores under "bags"
-  UI:SetView("bank")         -- first visit: starts from the current layout
-  env.__settle(2)
-  f:SetSize(500, 350); R.settings.scale = 0.8; f:SetScale(0.8)
-  UI:SavePosition()
-  UI:SetView("bags")
-  env.__settle(2)
-  assert(near(f:GetWidth(), 800) and near(f:GetScale(), 1.2), "bags layout restored")
-  UI:SetView("bank")
-  env.__settle(2)
-  assert(near(f:GetWidth(), 500) and near(f:GetScale(), 0.8), "bank layout restored")
-  R.settings.perViewSize = false
+  local s = R.settings
+  s.perViewSize = true
+  -- bags layout
+  s.width, s.height, s.scale = 800, 600, 1.2
+  UI:SaveViewLayout(UI:ViewKey())
+  assert(s.viewSizes.bags and s.viewSizes.bags.w == 800, "bags layout stored under bags")
+  -- another character's cache uses the shared "all" layout (first visit keeps the current one)
+  UI.charKey = "Old-TestRealm"
+  assert(UI:ViewKey() == "all")
+  UI:ApplyViewLayout("all")
+  s.width, s.height, s.scale = 500, 350, 0.8
+  UI:SaveViewLayout("all")
+  UI.charKey = nil
+  UI:ApplyViewLayout(UI:ViewKey())
+  assert(near(f:GetWidth(), 800) and near(f:GetScale(), 1.2), "bags layout restored: " .. f:GetWidth() .. " x" .. f:GetScale())
+  UI.charKey = "Old-TestRealm"
+  UI:ApplyViewLayout(UI:ViewKey())
+  assert(near(f:GetWidth(), 500) and near(f:GetScale(), 0.8), "all layout restored")
+  UI.charKey = nil
+  s.perViewSize = false
+end)
+
+test("bank is its own window with its own geometry; opening it does not hide Bags", function()
+  local env, R = boot()
+  local Bags, Bank = R.UI, R.BankUI
+  assert(Bags ~= Bank and Bags.frame and Bank.frame and Bags.frame ~= Bank.frame, "two separate windows")
+  assert(Bags.view == "bags" and Bank.view == "bank", "each window is fixed to its own view")
+  Bags:Open(); Bank:Open(); env.__settle(2)
+  assert(Bags.frame:IsShown() and Bank.frame:IsShown(), "both open together")
+  Bank:SetView("bags")
+  assert(Bank.view == "bank", "Bank window cannot switch to the bags view")
+  -- independent geometry
+  Bank.frame:SetSize(640, 480); Bank.frame:SetScale(1.4)
+  Bank:SavePosition()
+  assert(R.settings.bank and R.settings.bank.width == 640 and R.settings.bank.height == 480, "bank geometry stored apart")
+  assert(R.settings.width ~= 640, "bags geometry untouched")
+  Bank:ResetPosition()
+  assert(R.settings.bank.width == R.defaults.width, "bank reset leaves bags alone")
+  -- hiding Bags must not close the banker; hiding Bank must
+  local closed = 0
+  env.CloseBankFrame = function() closed = closed + 1 end
+  R.Data.atBank = true
+  R.settings.replaceBank = true
+  Bags:Close()
+  assert(closed == 0, "closing Bags must not close the bank")
+  Bank:Close()
+  assert(closed == 1, "closing the Bank window closes the banker")
+  R.Data.atBank = false
+  -- banker events open both windows, and close the ones they opened
+  Bags:Close(); Bank:Close()
+  env.__ev("BANKFRAME_OPENED"); env.__settle(2)
+  assert(Bank.frame:IsShown() and Bags.frame:IsShown(), "banker opens Bank and Bags")
+  env.__ev("BANKFRAME_CLOSED"); env.__settle(2)
+  assert(not Bank.frame:IsShown() and not Bags.frame:IsShown(), "closing the banker closes both")
+  assert(not env.__errors, "errors: " .. tostring(env.__errors and env.__errors[1]))
 end)
 
 ---------------------------------------------------------------------------

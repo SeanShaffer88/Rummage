@@ -33,8 +33,7 @@ R:RegisterEventOnce("PLAYER_LOGIN", function()
 	R.Tooltip:Init()
 	R.Upgrade:Init()
 	R.UI:RegisterPopups()
-	R.UI:Create()
-	R.UI:SetupKeyboard()
+	for _, w in ipairs(R.UIList) do w:Create(); w:SetupKeyboard() end
 	R.Extras:Init()
 	R.Hooks:Init()
 	R.Options:Init()
@@ -73,7 +72,7 @@ SlashCmdList.RUMMAGE = function(msg)
 	if cmd == "" then
 		R.UI:Toggle("bags")
 	elseif cmd == "bank" then
-		R.UI:Toggle("bank")
+		R.BankUI:Toggle()
 	elseif cmd == "config" or cmd == "options" or cmd == "settings" then
 		R.Options:Toggle()
 	elseif cmd == "search" then
@@ -86,7 +85,7 @@ SlashCmdList.RUMMAGE = function(msg)
 	elseif cmd == "conflicts" then
 		R.Hooks:CheckConflicts(true)
 	elseif cmd == "reset" then
-		R.UI:ResetPosition()
+		R:EachUI(function(w) w:ResetPosition() end)
 		R:Print("Window position reset.")
 	elseif cmd == "upgrade" then
 		R.Upgrade:Test()

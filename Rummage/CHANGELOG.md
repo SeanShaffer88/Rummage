@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.8.0 — 2026-11-09
+
+The Bank is now its own window, so items can be dragged from Bags to Bank and back. Passes the offline suite (28 cases); not yet run in game.
+
+- **Separate Bank window.** Visiting a banker opens the Bank window and, if it was closed, the Bags window beside it (Bank defaults to the left of Bags). Drag an item from one window onto empty space in the other, or right-click it to move it across as before. `/rum bank` and Shift-click on the minimap button toggle the Bank window.
+- **Independent geometry.** Each window keeps its own position, size, scale and per-view layouts (the Bank window's live under `bank` in the saved settings). Scale grips, edge handles and column resizing work in both. `/rum reset` and the settings button reset both.
+- **One tab per window.** Bags shows "Bags", Bank shows "Bank". Browsing another character or cross-character search still works in each.
+- **Closing.** Closing the Bank window closes the banker; closing Bags leaves the bank open. Leaving the banker closes the Bank window, and Bags too if the visit opened it.
+- **Keyboard navigation** follows the mouse while both windows are open.
+- **Internals.** The window code is built once per window (`UI_Boot.lua`); popups act on the window that raised them.
+
 ## 1.7.1 — 2026-11-08
 
 Fix from in-game screenshots of 1.6.0: settings tabs ran past the bottom of the settings window (General lost its last rows, Columns overlapped its footer, About spilled out). Passes the offline suite (27 cases); not yet run in game.

@@ -4,7 +4,7 @@
 
 local _, ns = ...
 local R = ns.R
-local UI = R.UI
+R.UIParts[#R.UIParts + 1] = function(UI)
 
 local floor, max, min, abs = math.floor, math.max, math.min, math.abs
 local ipairs = ipairs
@@ -161,7 +161,7 @@ function UI:ScaleStep(g)
 	if not ns_ then return end
 	if IsShiftKeyDown and IsShiftKeyDown() then ns_ = UI.SnapScale(ns_) end
 	local left = (g.side == "RIGHT") and g.fixedX or (g.fixedX - w * ns_)
-	R.settings.scale = ns_
+	self:Geo().scale = ns_
 	f:SetScale(ns_)
 	f:ClearAllPoints()
 	f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left / ns_, g.fixedY / ns_)
@@ -173,7 +173,7 @@ function UI:EndScale(g)
 	g.sizing = false
 	g:SetScript("OnUpdate", nil)
 	if self.scaleReadout then self.scaleReadout:Hide() end
-	local s = R.settings
+	local s = self:Geo()
 	s.scale = floor((s.scale or 1) * 100 + 0.5) / 100
 	if not InCombatLockdown() then
 		self.frame:SetScale(s.scale)
@@ -194,16 +194,35 @@ function UI:ViewKey()
 	return self.view == "bank" and "bank" or "bags"
 end
 
+-- Per-window geometry table: the Bags window uses the main settings (as before 1.8.0),
+-- the Bank window keeps its own size, scale, position and per-view layouts.
+function UI:Geo()
+	if self.kind ~= "bank" then return R.settings end
+	local b = R.settings.bank
+	if type(b) ~= "table" then b = {}; R.settings.bank = b end
+	local d = R.defaults
+	b.width = min(4000, max(400, tonumber(b.width) or d.width))
+	b.height = min(2400, max(300, tonumber(b.height) or d.height))
+	b.scale = min(2, max(0.5, tonumber(b.scale) or R.settings.scale or 1))
+	if type(b.viewSizes) ~= "table" then b.viewSizes = {} end
+	local p = b.point
+	if p ~= nil and not (type(p) == "table" and type(p[1]) == "string" and type(p[2]) == "string"
+		and type(p[3]) == "number" and type(p[4]) == "number") then
+		b.point = nil
+	end
+	return b
+end
+
 function UI:SaveViewLayout(key)
-	local s = R.settings
-	if not s.perViewSize or not key then return end
+	local s = self:Geo()
+	if not R.settings.perViewSize or not key then return end
 	s.viewSizes[key] = { w = s.width, h = s.height, scale = s.scale }
 end
 
 -- Loads the stored layout for `key` (or keeps the current one when none is stored).
 function UI:ApplyViewLayout(key)
-	local s = R.settings
-	if not s.perViewSize or not self.frame then return end
+	local s = self:Geo()
+	if not R.settings.perViewSize or not self.frame then return end
 	local v = s.viewSizes[key]
 	if not v then
 		s.viewSizes[key] = { w = s.width, h = s.height, scale = s.scale }
@@ -218,19 +237,23 @@ function UI:ApplyViewLayout(key)
 end
 
 function UI:ApplyPosition()
-	local f, s = self.frame, R.settings
+	local f, s = self.frame, self:Geo()
 	f:ClearAllPoints()
 	f:SetSize(s.width, s.height)
 	f:SetScale(s.scale)
 	if s.point then
 		f:SetPoint(s.point[1], UIParent, s.point[2], s.point[3], s.point[4])
+	elseif self.kind == "bank" then
+		-- default: just left of the Bags window, so items can be dragged across
+		local bw = (R.settings.width or 560) * (R.settings.scale or 1)
+		f:SetPoint("RIGHT", UIParent, "RIGHT", -(80 + bw + 16) / (s.scale or 1), 0)
 	else
 		f:SetPoint("RIGHT", UIParent, "RIGHT", -80, 0)
 	end
 end
 
 function UI:SavePosition()
-	local f, s = self.frame, R.settings
+	local f, s = self.frame, self:Geo()
 	local p, _, rp, x, y = f:GetPoint()
 	s.point = { p, rp, x, y }
 	s.width, s.height = floor(f:GetWidth() + 0.5), floor(f:GetHeight() + 0.5)
@@ -238,9 +261,11 @@ function UI:SavePosition()
 end
 
 function UI:ResetPosition()
-	R.settings.point = nil
-	R.settings.width, R.settings.height = R.defaults.width, R.defaults.height
-	R.settings.viewSizes = {}
+	local s = self:Geo()
+	s.point = nil
+	s.width, s.height = R.defaults.width, R.defaults.height
+	s.viewSizes = {}
 	self:ApplyPosition()
 	self:Layout()
+end
 end
