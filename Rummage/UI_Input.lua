@@ -102,18 +102,27 @@ function UI:SetupKeyboard()
 	local f = self.frame
 	if not f or self.keyboardReady then return end
 	self.keyboardReady = true
+	-- SetPropagateKeyboardInput is protected in combat (ADDON_ACTION_BLOCKED): never call it then.
+	local function propagate(fr, v)
+		if InCombatLockdown() or not fr.SetPropagateKeyboardInput then return end
+		fr:SetPropagateKeyboardInput(v)
+	end
 	local function sync()
-		local on = R.settings.keyboardNav and f:IsShown() and not InCombatLockdown()
-		f:EnableKeyboard(on and true or false)
-		if f.SetPropagateKeyboardInput then f:SetPropagateKeyboardInput(true) end
+		local combat = InCombatLockdown()
+		local on = R.settings.keyboardNav and f:IsShown() and not combat
+		if not combat then f:EnableKeyboard(on and true or false) end
+		propagate(f, true)
 	end
 	f:HookScript("OnShow", sync)
-	f:HookScript("OnHide", function() f:EnableKeyboard(false); UI.selected = nil end)
+	f:HookScript("OnHide", function()
+		if not InCombatLockdown() then f:EnableKeyboard(false) end
+		UI.selected = nil
+	end)
 	f:SetScript("OnKeyDown", function(self, key)
 		local handled = UI:HandleNavKey(key)
-		if self.SetPropagateKeyboardInput then self:SetPropagateKeyboardInput(not handled) end
+		propagate(self, not handled)
 	end)
-	R:RegisterEvent("PLAYER_REGEN_DISABLED", function() f:EnableKeyboard(false) end)
+	R:RegisterEvent("PLAYER_REGEN_DISABLED", function() pcall(f.EnableKeyboard, f, false) end)
 	R:RegisterEvent("PLAYER_REGEN_ENABLED", sync)
 	self.SyncKeyboard = sync
 end

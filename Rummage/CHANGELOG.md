@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.8.1 — 2026-11-10
+
+- **Fix:** opening a window in combat raised ADDON_ACTION_BLOCKED (`SetPropagateKeyboardInput`). Keyboard calls are now skipped in combat; navigation stays off there as before.
+
 ## 1.8.0 — 2026-11-09
 
 The Bank is now its own window, so items can be dragged from Bags to Bank and back. Passes the offline suite (28 cases); not yet run in game.

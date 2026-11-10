@@ -2,7 +2,7 @@
 ## Title: |cffd9a441Rummage|r
 ## Notes: List-view bag & bank replacement: sortable columns, categories, search, alts, one-click upgrade equipping, junk selling, themes, and Auctionator/TSM/Pawn/CanIMogIt/Scrap support.
 ## Author: Malikor
-## Version: 1.8.0
+## Version: 1.8.1
 ## IconTexture: Interface\AddOns\Rummage\Media\Icon
 ## SavedVariables: RummageDB
 ## OptionalDeps: Scrap, Auctionator, TradeSkillMaster, Pawn, CanIMogIt, Syndicator, ElvUI, EllesmereUI, GW2_UI, Tukui, NDui, LibSharedMedia-3.0, LibDBIcon-1.0
