@@ -176,7 +176,7 @@ function Extras:PrintPerf()
 	local clock = _G.debugprofilestop
 	if not clock then R:Print("Perf needs debugprofilestop, which this client lacks."); return end
 	local t0 = clock()
-	if R.UI and R.UI.frame and R.UI.frame:IsShown() then R.UI:Refresh() end
+	if R.UI and R.UI.frame and R.UI.frame:IsShown() then R:EachUI(function(w) if w.frame:IsShown() then w:Refresh() end end) end
 	local t1 = clock()
 	R.Data:ScanInventory()
 	local t2 = clock()
@@ -311,7 +311,8 @@ function Extras:ApplyContext()
 				R.settings.autoProfile = keep   -- a profile never switches auto-profiles off
 				R:Print("Auto-profile: " .. key .. " -> '" .. name .. "'.")
 				if R.UI and R.UI.frame then
-					R.UI:ApplyPosition(); R.UI:ApplySkin(); R.UI:Layout(); R:RequestRefresh()
+					R:EachUI(function(w) w:ApplyPosition(); w:ApplySkin(); w:Layout() end)
+					R:RequestRefresh()
 				end
 			end
 			return true

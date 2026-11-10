@@ -153,7 +153,7 @@ local function DoRefresh()
 	lastRefresh = GetTime()
 	if R.UI and R.UI.Refresh then
 		local t0 = R:ProfileStart()
-		R.UI:Refresh()
+		R:EachUI(function(w) w:Refresh() end)
 		R:ProfileEnd("UI:Refresh", t0)
 	end
 end
@@ -656,7 +656,7 @@ function R:ApplyProfile(name, silent)
 	-- Refresh any surfaces that already exist (none do at ADDON_LOADED time).
 	if R.Minimap and R.Minimap.Update then pcall(R.Minimap.Update, R.Minimap) end
 	if R.Options and R.Options.Rebuild then pcall(R.Options.Rebuild, R.Options) end
-	if R.UI and R.UI.frame then R.UI:ApplyPosition(); R.UI:ApplySkin() end
+	if R.UI and R.UI.frame then R:EachUI(function(w) w:ApplyPosition(); w:ApplySkin() end) end
 	R:RequestRefresh()
 	return true
 end
@@ -812,7 +812,7 @@ function R:ImportSettings(str)
 	R.db.profileName = nil
 	if R.Minimap and R.Minimap.Update then pcall(R.Minimap.Update, R.Minimap) end
 	if R.Options and R.Options.Rebuild then pcall(R.Options.Rebuild, R.Options) end
-	if R.UI and R.UI.frame then R.UI:ApplyPosition(); R.UI:ApplySkin() end
+	if R.UI and R.UI.frame then R:EachUI(function(w) w:ApplyPosition(); w:ApplySkin() end) end
 	R:RequestRefresh()
 	return true
 end

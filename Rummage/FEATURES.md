@@ -1,6 +1,6 @@
 # Rummage — Features
 
-The full feature list for Rummage 1.7.1 for WoW Forever
+The full feature list for Rummage 1.8.0 for WoW Forever
 (Interface 16001). For the short version see `README.md`; for
 store-listing copy see `DESCRIPTION.md`.
 
@@ -9,7 +9,7 @@ Rummage is by Malikor, GPLv3 or later.
 
 ## The window
 
-- **One window for bags, keyring and bank**, with Bags / Bank tabs.
+- **Bags and Bank in two windows** (bags + keyring in one, bank in its own), each with its own position, size and scale.
 - **List view** (a configurable table) or **grid view** (icons with
   item level, count, favorite, junk, upgrade and quest badges).
 - Sort by any column; favorites and/or new items pinned on top.
@@ -141,6 +141,11 @@ Auctionator (price columns, `ah>` search), TradeSkillMaster (any
 custom price source, `tsm>` search), Pawn (upgrade arrow and %,
 `pawn>` search), Can I Mog It? (transmog status), Scrap (junk
 list), Syndicator (tooltip counts step aside).
+
+## New in 1.8.0
+
+Bank in its own window beside Bags: drag items between them. Each window has its
+own position, size and scale.
 
 ## New in 1.7.1
 

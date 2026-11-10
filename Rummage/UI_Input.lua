@@ -8,7 +8,7 @@
 local _, ns = ...
 local R = ns.R
 local API = R.API
-local UI = R.UI
+R.UIParts[#R.UIParts + 1] = function(UI)
 
 local InCombatLockdown = InCombatLockdown
 
@@ -58,6 +58,11 @@ function UI:HandleNavKey(key)
 	local s = R.settings
 	if not s.keyboardNav or InCombatLockdown() then return false end
 	if self.searchBox and self.searchBox:HasFocus() then return false end
+	-- Two windows can be open (Bags + Bank): keys go to the one under the mouse.
+	local other = (self.kind == "bank") and R.UI or R.BankUI
+	if other and other.frame and other.frame:IsShown() and self.frame.IsMouseOver and not self.frame:IsMouseOver() then
+		return false
+	end
 	local list = self:NavEntries()
 	if key == "ESCAPE" then self.selected = nil; return false end
 	if #list == 0 then return false end
@@ -111,4 +116,5 @@ function UI:SetupKeyboard()
 	R:RegisterEvent("PLAYER_REGEN_DISABLED", function() f:EnableKeyboard(false) end)
 	R:RegisterEvent("PLAYER_REGEN_ENABLED", sync)
 	self.SyncKeyboard = sync
+end
 end

@@ -5,7 +5,7 @@
 local _, ns = ...
 local R = ns.R
 local API = R.API
-local UI = R.UI
+R.UIParts[#R.UIParts + 1] = function(UI)
 local W = R.Widgets
 
 local pairs, ipairs, type, wipe, tostring = pairs, ipairs, type, wipe, tostring
@@ -73,7 +73,7 @@ function UI:ShowPresetMenu(anchor)
 		}
 	end
 	items[#items + 1] = { text = "Save current as preset...", func = function()
-		StaticPopup_Show("RUMMAGE_NEW_PRESET")
+		R.popupUI = UI; StaticPopup_Show("RUMMAGE_NEW_PRESET")
 	end }
 	W:Menu(anchor, items)
 end
@@ -130,7 +130,7 @@ function UI:ShowCharMenu(anchor)
 		}
 		if entry.key ~= R.charKey then
 			item.onDelete = function()
-				StaticPopup_Show("RUMMAGE_DELETE_CHAR", entry.key, nil, entry.key)
+				R.popupUI = UI; StaticPopup_Show("RUMMAGE_DELETE_CHAR", entry.key, nil, entry.key)
 			end
 		end
 		items[#items + 1] = item
@@ -142,8 +142,8 @@ function UI:ShowCategoryMenu(anchor, cat)
 	local idx = cat.custom
 	W:Menu(anchor, {
 		{ text = cat.name, isTitle = true },
-		{ text = "Edit filter...", func = function() StaticPopup_Show("RUMMAGE_EDIT_CATEGORY", cat.name, nil, idx) end },
-		{ text = "Rename...", func = function() StaticPopup_Show("RUMMAGE_RENAME_CATEGORY", cat.name, nil, idx) end },
+		{ text = "Edit filter...", func = function() R.popupUI = UI; StaticPopup_Show("RUMMAGE_EDIT_CATEGORY", cat.name, nil, idx) end },
+		{ text = "Rename...", func = function() R.popupUI = UI; StaticPopup_Show("RUMMAGE_RENAME_CATEGORY", cat.name, nil, idx) end },
 		{ text = "Use current search as filter", func = function()
 			R.db.categories[idx].query = UI.search
 			R:RequestRefresh()
@@ -159,7 +159,7 @@ function UI:ShowCategoryMenu(anchor, cat)
 end
 
 function UI:PromptNewCategory()
-	StaticPopup_Show("RUMMAGE_NEW_CATEGORY")
+	R.popupUI = UI; StaticPopup_Show("RUMMAGE_NEW_CATEGORY")
 end
 
 local function EditBoxOf(dialog)
@@ -167,6 +167,7 @@ local function EditBoxOf(dialog)
 end
 
 function UI:RegisterPopups()
+	local function CUR() return R.popupUI or UI end
 	StaticPopupDialogs["RUMMAGE_NEW_CATEGORY"] = {
 		text = "Name for the new category?\n(Its filter will be the current search: \"%s\")",
 		button1 = ACCEPT, button2 = CANCEL, hasEditBox = true, maxLetters = 40,
@@ -178,8 +179,8 @@ function UI:RegisterPopups()
 			local eb = EditBoxOf(self)
 			local name = eb and eb:GetText() or ""
 			if name ~= "" then
-				local idx = R.Categories:AddCustom(name, UI.search)
-				UI:SetCategory("custom" .. idx)
+				local idx = R.Categories:AddCustom(name, CUR().search)
+				CUR():SetCategory("custom" .. idx)
 				R:RequestRefresh()
 			end
 		end,
@@ -249,7 +250,7 @@ function UI:RegisterPopups()
 		button1 = YES, button2 = NO,
 		OnAccept = function(_, key)
 			R.db.chars[key] = nil
-			if UI.charKey == key then UI.charKey = nil end
+			if CUR().charKey == key then CUR().charKey = nil end
 			R:Fire("DATA_CHANGED")
 		end,
 		timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
@@ -258,8 +259,8 @@ function UI:RegisterPopups()
 		text = "Move EVERY listed item to your %s?",
 		button1 = YES, button2 = NO,
 		OnAccept = function()
-			UI.transferConfirmed = true
-			UI:DoTransfer()
+			CUR().transferConfirmed = true
+			CUR():DoTransfer()
 		end,
 		timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
 	}
@@ -346,7 +347,7 @@ end
 function UI:ShowTextWindow(title, text)
 	local f = self.textWindow
 	if not f then
-		f = CreateFrame("Frame", "RummageTextWindow", UIParent, API.Backdrop)
+		f = CreateFrame("Frame", "RummageTextWindow" .. (UI.kind == "bank" and "Bank" or ""), UIParent, API.Backdrop)
 		f:SetSize(520, 360)
 		f:SetPoint("CENTER")
 		f:SetFrameStrata("DIALOG")
@@ -357,7 +358,7 @@ function UI:ShowTextWindow(title, text)
 		f:SetScript("OnDragStop", f.StopMovingOrSizing)
 		f.title = W:Text(f, "normal")
 		f.title:SetPoint("TOPLEFT", 12, -10)
-		local scroll = CreateFrame("ScrollFrame", "RummageTextWindowScroll", f, "UIPanelScrollFrameTemplate")
+		local scroll = CreateFrame("ScrollFrame", "RummageTextWindowScroll" .. (UI.kind == "bank" and "Bank" or ""), f, "UIPanelScrollFrameTemplate")
 		scroll:SetPoint("TOPLEFT", 12, -34)
 		scroll:SetPoint("BOTTOMRIGHT", -30, 40)
 		local eb = CreateFrame("EditBox", nil, scroll)
@@ -370,7 +371,7 @@ function UI:ShowTextWindow(title, text)
 		f.edit = eb
 		local close = W:Button(f, CLOSE, 80, 22, function() f:Hide() end)
 		close:SetPoint("BOTTOMRIGHT", -12, 10)
-		tinsert(UISpecialFrames, "RummageTextWindow")
+		tinsert(UISpecialFrames, "RummageTextWindow" .. (UI.kind == "bank" and "Bank" or ""))
 		self.textWindow = f
 	end
 	f.title:SetText(title or "")
@@ -378,4 +379,5 @@ function UI:ShowTextWindow(title, text)
 	f.edit:HighlightText()
 	f:Show()
 	f.edit:SetFocus()
+end
 end

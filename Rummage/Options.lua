@@ -15,7 +15,7 @@ local COL2 = 280
 local function S() return R.settings end
 -- Sliders fire OnValueChanged continuously while dragged; re-skinning the main window on
 -- every tick was the most expensive thing the options panel did. Coalesce to once per frame.
-local function DoRelayout() R.UI:ApplySkin(); R:RequestRefresh() end
+local function DoRelayout() R:EachUI(function(w) w:ApplySkin() end); R:RequestRefresh() end
 local function Relayout() R:Defer("optionsRelayout", DoRelayout) end
 
 local function Cycle(list, current, dir)
@@ -103,7 +103,7 @@ builders.general = function(p)
 		function(v) if v then S().lastCategory = R.UI.category or "all" end end)
 	st:Check("Clear \"new\" marks when closed", "clearNewOnClose")
 	st:Check("Minimap button", "show", nil, function() R.Minimap:Update() end, S().minimap)
-	local reset = W:Button(p, "Reset window position", COL2 - 30, 20, function() R.UI:ResetPosition() end)
+	local reset = W:Button(p, "Reset window position", COL2 - 30, 20, function() R:EachUI(function(w) w:ResetPosition() end) end)
 	st:Place(reset, 20, 8)
 
 	st:Header("Keybinds")
@@ -122,7 +122,7 @@ builders.general = function(p)
 	st:Check("Mailbox", "mail", nil, nil, ao)
 	st:Check("Auction House", "auction", nil, nil, ao)
 	st:Check("Trade window", "trade", nil, nil, ao)
-	st:Check("Banker (opens Bank tab)", "bank", nil, nil, ao)
+	st:Check("Banker (opens Bank window)", "bank", nil, nil, ao)
 	st:Check("Other Blizzard \"open bags\" calls", "other", nil, nil, ao)
 
 	st:Header("Safety")
@@ -310,7 +310,7 @@ builders.items = function(p)
 	end)
 	st:Place(unjunk, 20, 6)
 	local resetAll = W:Button(p, "|cffff6060Reset all settings|r", COL2 - 30, 20, function()
-		R:ResetSettings(); R.UI:ApplyPosition(); O:Rebuild(); Relayout()
+		R:ResetSettings(); R:EachUI(function(w) w:ApplyPosition() end); O:Rebuild(); Relayout()
 	end)
 	st:Place(resetAll, 20, 6)
 	return st
@@ -335,12 +335,12 @@ builders.columns = function(p)
 					r:SetPoint("TOPLEFT", 12, -34 - (i - 1) * 24)
 					r.check = W:Check(r, "", function() return not cfg.hidden[r.key] end, function(v)
 						cfg.hidden[r.key] = (not v) or nil
-						R.UI:Layout()
+						R:EachUI(function(w) w:Layout() end)
 					end)
 					r.check:SetPoint("LEFT")
-					r.up = W:Button(r, "Up", 36, 18, function() R.Columns:Move(r.key, -1); build(); R.UI:Layout() end)
+					r.up = W:Button(r, "Up", 36, 18, function() R.Columns:Move(r.key, -1); build(); R:EachUI(function(w) w:Layout() end) end)
 					r.up:SetPoint("LEFT", 300, 0)
-					r.down = W:Button(r, "Down", 44, 18, function() R.Columns:Move(r.key, 1); build(); R.UI:Layout() end)
+					r.down = W:Button(r, "Down", 44, 18, function() R.Columns:Move(r.key, 1); build(); R:EachUI(function(w) w:Layout() end) end)
 					r.down:SetPoint("LEFT", r.up, "RIGHT", 4, 0)
 					r.width = W:Text(r, "small")
 					r.width:SetPoint("LEFT", r.down, "RIGHT", 10, 0)
@@ -359,7 +359,7 @@ builders.columns = function(p)
 		end
 	end
 	build()
-	local reset = W:Button(p, "Reset widths", 100, 20, function() wipe(cfg.widths); build(); R.UI:Layout() end)
+	local reset = W:Button(p, "Reset widths", 100, 20, function() wipe(cfg.widths); build(); R:EachUI(function(w) w:Layout() end) end)
 	reset:SetPoint("BOTTOMLEFT", 12, 12)
 	local note = W:Text(p, "small")
 	note:SetPoint("LEFT", reset, "RIGHT", 10, 0)

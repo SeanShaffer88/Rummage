@@ -11,7 +11,7 @@ Rummage puts every item you own into one sortable table: full item names, item l
 ## Features
 
 **Window**
-- One window for bags, keyring and bank, with Bags / Bank tabs
+- Bags (with keyring) and Bank in two windows, each with its own position, size and scale
 - **List view** (configurable table) or **grid view** (icons with item level, count, favorite, junk, upgrade and quest badges)
 - Sort by any column; favorites and/or new items pinned on top
 - Show, hide, reorder and resize columns (drag a header edge; right-click a header to toggle)
@@ -129,6 +129,9 @@ Diagnostics: `/fdebug` (or `/rum debug`) toggles an overlay with memory, frame t
 In the list: Up/Down/Page Up/Page Down/Home/End select a row, Enter uses the item, Space cycles its favorite marker. Disabled while the search box has focus and in combat (setting: General → Keyboard navigation). Drag a bottom corner to scale; hold Shift to snap to 75/100/125/150%.
 
 ## Mouse
+
+The Bank opens in its own window next to Bags (each remembers its own position, size and scale). Drag an item from one window onto empty list space in the other, or right-click it, to move it across.
+
 
 Drag the left, right or bottom edge to resize the window (up to 4000 x 2400); drag a bottom corner to scale it. Drag a column header's right edge to resize that column (Name too); double-click the edge to reset it.
 

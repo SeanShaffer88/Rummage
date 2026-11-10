@@ -91,10 +91,12 @@ function Hooks:InitBank()
 		R.Data.atBank = true
 		R.Data:ScanBank()
 		if R.settings.replaceBank then
-			local UI = R.UI
-			UI.openedByBank = not UI.frame:IsShown()
-			if R.settings.autoOpen.bank ~= false or UI.frame:IsShown() then
-				UI:Open("bank")
+			-- Bank gets its own window; Bags opens beside it so items can be dragged across.
+			local Bags, Bank = R.UI, R.BankUI
+			Bags.openedByBank = not Bags.frame:IsShown()
+			if R.settings.autoOpen.bank ~= false or Bags.frame:IsShown() then
+				Bank:Open()
+				if not Bags.frame:IsShown() then Bags:Open() end
 			end
 		end
 		R:Fire("DATA_CHANGED")
@@ -102,13 +104,11 @@ function Hooks:InitBank()
 	R:RegisterEvent("BANKFRAME_CLOSED", function()
 		if not R.Data.atBank then return end
 		R.Data.atBank = false
-		local UI = R.UI
-		if UI.openedByBank and UI.frame:IsShown() then
-			UI:Close()
-		elseif UI.view == "bank" then
-			R:RequestRefresh()
-		end
-		UI.openedByBank = false
+		local Bags, Bank = R.UI, R.BankUI
+		if Bank.frame:IsShown() then Bank:Close() end
+		if Bags.openedByBank and Bags.frame:IsShown() then Bags:Close() end
+		Bags.openedByBank = false
+		R:RequestRefresh()
 		R:Fire("DATA_CHANGED")
 	end)
 end

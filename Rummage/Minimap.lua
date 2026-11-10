@@ -14,7 +14,7 @@ local function OnClick(button)
 	if button == "RightButton" then
 		R.Options:Toggle()
 	elseif button == "MiddleButton" or IsShiftKeyDown() then
-		R.UI:Toggle("bank")
+		R.BankUI:Toggle()
 	else
 		R.UI:Toggle("bags")
 	end
