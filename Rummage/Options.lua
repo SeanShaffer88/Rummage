@@ -98,6 +98,8 @@ builders.general = function(p)
 	st:Check("Replace Blizzard bank", "replaceBank", "Requires /reload to take full effect.", function() O:NeedReload() end)
 	st:Check("Replace Blizzard guild bank", "replaceGuildBank",
 		"The guild vault opens in Rummage's Guild Bank window. Requires /reload to take full effect.", function() O:NeedReload() end)
+	st:Check("Open Bank and Guild Bank beside Bags", "dockBeside",
+		"They open next to the Bags window (left if there's room, else right) with the same height and scale, no wider than Bags. Off: they open where you last left them.")
 	st:Check("Lock window position", "locked", "Prevents moving and resizing.")
 	st:Check("Clear search when opened", "resetSearchOnOpen")
 	st:Check("Remember last selected category", "rememberCategory",
@@ -226,7 +228,8 @@ builders.appearance = function(p)
 
 	st:Header("Layout")
 	st:Check("Show category sidebar", "showSidebar", nil, Relayout)
-	st:Check("Compact sidebar (icons only)", "compactSidebar", nil, Relayout)
+	st:Check("Categories as icons only (names on hover)", "compactSidebar",
+		"Icon rail with item counts as badges. Bank and Guild Bank keep it on the edge away from Bags. Off: icons with names.", Relayout)
 	st:Check("Hide empty categories", "hideEmptyCategories")
 
 	st:Col(1)

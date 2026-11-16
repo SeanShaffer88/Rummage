@@ -29,7 +29,7 @@ local PAD = 6
 local COLHEAD_H = 20
 local CHIPS_H = 22
 local SIDEBAR_W = 156
-local SIDEBAR_COMPACT_W = 34
+local SIDEBAR_COMPACT_W = 44   -- 1.9.1: icon rail (icons only, counts as badges)
 local SCROLL_W = 10
 local FAV_ICON = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_"
 local COIN_ICON = "Interface\\Icons\\INV_Misc_Coin_02"
@@ -58,7 +58,9 @@ local NO_GUILD = { containers = {}, money = 0, numTabs = 0 }
 
 function UI:Char()
 	if self.kind == "guild" then
-		NO_GUILD.name = R.L.noGuild
+		-- in a guild whose bank isn't cached yet: show the guild's name, not "No guild"
+		local _, gname = R.GuildBank:Key()
+		NO_GUILD.name = gname or R.L.noGuild
 		local key = self.guildKey
 		local alt = not key and not R.GuildBank.atBank and R.UI.charKey and R.db.chars[R.UI.charKey]
 		if alt then
@@ -293,6 +295,10 @@ function UI:CreateHeader()
 	mag:SetVertexColor(0.7, 0.7, 0.7)
 	local hint = W:Text(search, "small")
 	hint:SetPoint("LEFT", 22, 0)
+	-- clipped to the box (it used to run over the Preset button when the header is crowded)
+	hint:SetPoint("RIGHT", search, "RIGHT", -40, 0)
+	hint:SetJustifyH("LEFT")
+	if hint.SetWordWrap then hint:SetWordWrap(false) end
 	hint:SetText(R.L.searchHint)
 	hint:SetTextColor(0.5, 0.5, 0.5)
 	local clear = CreateFrame("Button", nil, search)
@@ -375,6 +381,7 @@ function UI:CreateContent()
 	-- column headers
 	local colhead = CreateFrame("Frame", nil, content, API.Backdrop)
 	colhead:SetHeight(COLHEAD_H)
+	colhead:SetClipsChildren(true)  -- header labels never spill past the list
 	self.colhead = colhead
 
 	-- list area
@@ -496,14 +503,25 @@ function UI:ApplySkin()
 end
 
 -- Re-anchors the main regions using the active theme's padding.
+function UI:RailSide()
+	if self.kind == "bags" then return "LEFT" end
+	return self.railSide or "LEFT"
+end
+
 function UI:Anchor()
 	local pad = W:Pad()
 	self.header:ClearAllPoints()
 	self.header:SetPoint("TOPLEFT", pad, -pad)
 	self.header:SetPoint("TOPRIGHT", -pad, -pad)
 	self.sidebar:ClearAllPoints()
-	self.sidebar:SetPoint("TOPLEFT", pad, -(HEADER_H + pad - 6))
-	self.sidebar:SetPoint("BOTTOMLEFT", pad, FOOTER_H + pad - 6)
+	-- Bank / Guild Bank docked beside Bags keep their rail on the outer edge (railSide).
+	if self:RailSide() == "RIGHT" then
+		self.sidebar:SetPoint("TOPRIGHT", -pad, -(HEADER_H + pad - 6))
+		self.sidebar:SetPoint("BOTTOMRIGHT", -pad, FOOTER_H + pad - 6)
+	else
+		self.sidebar:SetPoint("TOPLEFT", pad, -(HEADER_H + pad - 6))
+		self.sidebar:SetPoint("BOTTOMLEFT", pad, FOOTER_H + pad - 6)
+	end
 	self.footer:ClearAllPoints()
 	self.footer:SetPoint("BOTTOMLEFT", pad + 14, pad - 2)
 	self.footer:SetPoint("BOTTOMRIGHT", -pad - 14, pad - 2)
@@ -518,7 +536,7 @@ function UI:LayoutIfChanged()
 	local w, h = self.frame:GetWidth(), self.frame:GetHeight()
 	if g.w ~= w or g.h ~= h or g.chips ~= self.chips:IsShown() or g.view ~= s.viewMode
 		or g.rh ~= s.rowHeight or g.grid ~= s.gridSize or g.side ~= s.showSidebar
-		or g.compact ~= s.compactSidebar or g.theme ~= W:Skin() then
+		or g.compact ~= s.compactSidebar or g.theme ~= W:Skin() or g.rail ~= self:RailSide() then
 		return self:Layout()
 	end
 	if g.sortKey ~= s.sortKey or g.sortAsc ~= s.sortAsc then
@@ -538,19 +556,26 @@ function UI:Layout()
 	self.geom = g
 	g.w, g.h, g.chips, g.view = self.frame:GetWidth(), self.frame:GetHeight(), self.chips:IsShown(), s.viewMode
 	g.rh, g.grid, g.side, g.compact, g.theme = s.rowHeight, s.gridSize, s.showSidebar, s.compactSidebar, W:Skin()
+	g.rail = self:RailSide()
 	g.sortKey, g.sortAsc = s.sortKey, s.sortAsc
 	self:Anchor()
 	local compact = s.compactSidebar
 	self.sidebar:SetShown(s.showSidebar)
 	self.sidebar:SetWidth(compact and SIDEBAR_COMPACT_W or SIDEBAR_W)
-	self.addCatBtn:SetShown(not compact)
+	self.addCatBtn:SetWidth((compact and SIDEBAR_COMPACT_W or SIDEBAR_W) - 8)
+	self.addCatBtn:SetLabel(compact and "+" or "+ New category")
 	self.content:ClearAllPoints()
-	if s.showSidebar then
-		self.content:SetPoint("TOPLEFT", self.sidebar, "TOPRIGHT", PAD, 0)
-	else
+	if s.showSidebar and self:RailSide() == "RIGHT" then
 		self.content:SetPoint("TOPLEFT", pad, -(HEADER_H + pad - 6))
+		self.content:SetPoint("BOTTOMRIGHT", self.sidebar, "BOTTOMLEFT", -PAD, 0)
+	else
+		if s.showSidebar then
+			self.content:SetPoint("TOPLEFT", self.sidebar, "TOPRIGHT", PAD, 0)
+		else
+			self.content:SetPoint("TOPLEFT", pad, -(HEADER_H + pad - 6))
+		end
+		self.content:SetPoint("BOTTOMRIGHT", -pad, FOOTER_H + pad - 6)
 	end
-	self.content:SetPoint("BOTTOMRIGHT", -pad, FOOTER_H + pad - 6)
 	self.viewBtn:SetLabel(s.viewMode == "list" and R.L.toGrid or R.L.toList)
 
 	local top = 0
@@ -622,7 +647,13 @@ function UI:ComputeColumns()
 		layout[#layout + 1] = { col = col, x = x, w = w }
 		x = x + w + 4
 	end
-	self.colLayout = layout
+	-- Columns that don't fit the window are left out instead of being drawn half over the
+	-- scrollbar and the window edge (the name column always stays).
+	local fitted = {}
+	for _, L in ipairs(layout) do
+		if L.x + L.w <= width + 2 or L.col == flexCol or L.col.key == "name" then fitted[#fitted + 1] = L end
+	end
+	self.colLayout = fitted
 	self.colVersion = (self.colVersion or 0) + 1  -- rows re-anchor their cells only when this changes
 	self:UpdateHeaders()
 end
@@ -1707,7 +1738,7 @@ UI.savedButtons = {}
 function UI:UpdateSavedSearches(compact)
 	for _, b in ipairs(self.savedButtons) do b:Hide() end
 	local saved = R.db and R.db.savedSearches or {}
-	if compact or #saved == 0 then return 0 end
+	if #saved == 0 then return 0 end
 	for i, q in ipairs(saved) do
 		local b = self.savedButtons[i]
 		if not b then
@@ -1723,7 +1754,9 @@ function UI:UpdateSavedSearches(compact)
 			self.savedButtons[i] = b
 		end
 		b.index, b.query = i, q
-		b:SetLabel("|cffd9a441*|r " .. q)
+		-- icon rail: numbered stubs (the search is in the tooltip)
+		b:SetWidth((compact and SIDEBAR_COMPACT_W or SIDEBAR_W) - 8)
+		b:SetLabel(compact and ("|cffd9a441*|r" .. i) or ("|cffd9a441*|r " .. q))
 		b:ClearAllPoints()
 		b:SetPoint("BOTTOM", self.sidebar, "BOTTOM", 0, 26 + (#saved - i) * 20)
 		W:SetTooltip(b, "Saved search", "Click to run: " .. q .. "\nRight-click to remove.")
@@ -1756,9 +1789,10 @@ function UI:UpdateSidebar()
 	end
 	for _, b in ipairs(self.catButtons) do b:Hide() end
 	local width = compact and SIDEBAR_COMPACT_W or SIDEBAR_W
-	local bh = 22
+	local bh = compact and 34 or 22
 	local savedH = self:UpdateSavedSearches(compact)
-	local avail = (self.sidebar:GetHeight() or 300) - (compact and 6 or 30) - savedH
+	local avail = (self.sidebar:GetHeight() or 300) - 30 - savedH
+	local outer = self:RailSide()
 	local maxVisible = math.max(1, math.floor(avail / bh))
 	local maxOff = math.max(0, #cats - maxVisible)
 	self.catOffset = math.min(self.catOffset or 0, maxOff)
@@ -1802,6 +1836,7 @@ function UI:UpdateSidebar()
 			b:SetScript("OnEnter", function(self)
 				GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
 				GameTooltip:SetText(self.cat.name)
+				if (self.n or 0) > 0 then GameTooltip:AddLine(self.n .. (self.n == 1 and " item" or " items"), 1, 1, 1) end
 				if self.cat.custom then
 					local def = R.db.categories[self.cat.custom]
 					GameTooltip:AddLine("Filter: " .. (def and def.query or ""), 1, 1, 1, true)
@@ -1816,17 +1851,38 @@ function UI:UpdateSidebar()
 		b:ClearAllPoints()
 		b:SetPoint("TOPLEFT", 2, -3 - (i - 1) * bh)
 		b:SetWidth(width - 4)
+		b:SetHeight(bh - 2)
+		-- icon rail: a large centred icon, the count as a corner badge, the accent bar on
+		-- the rail's outer edge; the name is in the tooltip. Labelled: icon, name, count.
+		b.icon:ClearAllPoints(); b.count:ClearAllPoints(); b.bar:ClearAllPoints()
+		if compact then
+			b.icon:SetSize(24, 24)
+			b.icon:SetPoint("CENTER")
+			b.count:SetPoint("BOTTOMRIGHT", -1, 1)
+		else
+			b.icon:SetSize(16, 16)
+			b.icon:SetPoint("LEFT", 6, 0)
+			b.count:SetPoint("RIGHT", -6, 0)
+		end
+		local barSide = (compact and outer == "RIGHT") and "RIGHT" or "LEFT"
+		b.bar:SetPoint("TOP" .. barSide)
+		b.bar:SetPoint("BOTTOM" .. barSide)
 		b.icon:SetTexture(c.icon)
 		if c.id ~= "fav" then b.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92) else b.icon:SetTexCoord(0, 1, 0, 1) end
 		b.text:SetText(c.name)
 		b.text:SetShown(not compact)
 		local n = self.catCounts and self.catCounts[c.id] or 0
+		b.n = n
 		b.count:SetText(n > 0 and n or "")
-		b.count:SetShown(not compact)
+		b.count:Show()
 		local active = self.category == c.id
 		b.bar:SetColorTexture(skin.accent[1], skin.accent[2], skin.accent[3], 1)
 		b.bar:SetShown(active)
-		b.bg:SetColorTexture(1, 1, 1, active and 0.08 or 0)
+		if compact and active then
+			b.bg:SetColorTexture(skin.accent[1], skin.accent[2], skin.accent[3], 0.18)
+		else
+			b.bg:SetColorTexture(1, 1, 1, active and 0.08 or 0)
+		end
 		local tc = active and skin.accent or (n > 0 and skin.text or skin.dim)
 		b.text:SetTextColor(tc[1], tc[2], tc[3])
 		b.count:SetTextColor(skin.dim[1], skin.dim[2], skin.dim[3])
@@ -2294,6 +2350,8 @@ function UI:OnShow()
 	end
 	if SOUNDKIT and SOUNDKIT.IG_BACKPACK_OPEN then PlaySound(SOUNDKIT.IG_BACKPACK_OPEN) end
 	self:ApplySkin()
+	-- Bank / Guild Bank open beside Bags; Bags opening pulls already-open ones beside it.
+	if self.kind == "bags" then self:DockAll() else self:DockBesideBags() end
 	self:Refresh()
 	R:Fire("FRAME_SHOWN")
 end

@@ -262,6 +262,81 @@ function UI:SavePosition()
 	self:SaveViewLayout(self:ViewKey())
 end
 
+---------------------------------------------------------------------------
+-- Docking (1.9.1): Bank and Guild Bank open beside Bags with the same height and
+-- scale, on whichever side has room, without covering each other. Setting: dockBeside.
+---------------------------------------------------------------------------
+local DOCK_GAP = 6
+
+-- Screen rectangle in UIParent units: left, top, width, height.
+local function ScreenRect(f)
+	local s = f:GetScale() or 1
+	local l, t = f:GetLeft(), f:GetTop()
+	if not (l and t) then return nil end
+	return l * s, t * s, f:GetWidth() * s, f:GetHeight() * s
+end
+UI.ScreenRect = ScreenRect
+
+-- avoid: list of frames to keep clear of (default: the other open docked windows).
+function UI:DockBesideBags(avoid)
+	if self.kind == "bags" or not R.settings.dockBeside or not self.frame then return false end
+	local Bags = R.UI
+	if not (Bags and Bags.frame and Bags.frame:IsShown()) or InCombatLockdown() then return false end
+	local bl, bt, bw = ScreenRect(Bags.frame)
+	if not bl then return false end
+	local f, g = self.frame, self:Geo()
+	local scale = Bags.frame:GetScale() or 1
+	local h = Bags.frame:GetHeight()
+	-- own width, but never wider than Bags (and not below the window minimum)
+	local w = max(460, min(g.width or 600, Bags.frame:GetWidth()))
+	local sw, sh = w * scale, h * scale
+	local screenW = UIParent:GetWidth() or 1920
+	if not avoid then
+		avoid = {}
+		for _, o in ipairs(R.UIList) do
+			if o ~= self and o ~= Bags and o.frame and o.frame:IsShown() then avoid[#avoid + 1] = o.frame end
+		end
+	end
+	local rects = { { bl, bt, bw, select(4, ScreenRect(Bags.frame)) } }
+	for _, fr in ipairs(avoid) do
+		local l, t, ww, hh = ScreenRect(fr)
+		if l then rects[#rects + 1] = { l, t, ww, hh } end
+	end
+	local function fits(x)
+		if x < 0 or x + sw > screenW then return false end
+		for _, r in ipairs(rects) do
+			if x < r[1] + r[3] and x + sw > r[1] and bt > r[2] - r[4] and bt - sh < r[2] then return false end
+		end
+		return true
+	end
+	-- left of Bags, right of Bags, then beside whichever docked window is already there
+	local cands = { bl - DOCK_GAP - sw, bl + bw + DOCK_GAP }
+	for _, r in ipairs(rects) do
+		cands[#cands + 1] = r[1] - DOCK_GAP - sw
+		cands[#cands + 1] = r[1] + r[3] + DOCK_GAP
+	end
+	local x
+	for _, c in ipairs(cands) do if fits(c) then x = c; break end end
+	if not x then x = max(0, min(screenW - sw, cands[1])) end
+	g.scale, g.width, g.height = scale, floor(w + 0.5), floor(h + 0.5)
+	-- category rail on the side away from Bags, so the two item lists face each other
+	self.railSide = (x + sw <= bl + 1) and "LEFT" or "RIGHT"
+	f:SetScale(scale)
+	f:SetSize(g.width, g.height)
+	f:ClearAllPoints()
+	f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x / scale, bt / scale)
+	return true
+end
+
+-- Bags just opened: dock every open Bank / Guild Bank window beside it, one after another.
+function UI:DockAll()
+	if self.kind ~= "bags" then return end
+	local placed = {}
+	for _, o in ipairs(R.UIList) do
+		if o ~= self and o.frame and o.frame:IsShown() and o:DockBesideBags(placed) then placed[#placed + 1] = o.frame end
+	end
+end
+
 function UI:ResetPosition()
 	local s = self:Geo()
 	s.point = nil

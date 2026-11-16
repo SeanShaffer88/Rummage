@@ -185,7 +185,7 @@ test("sanitizer repairs garbage and migrates a v3 database", function()
   assert(s.keyboardNav == true, "type repaired")
   assert(s.viewSizes.evil == nil and s.viewSizes.bags.w == 400 and s.viewSizes.bags.h == 2400 and s.viewSizes.bags.scale == 2)
   assert(#db.savedSearches == 2 and #db.junkLog == 1 and db.contextProfiles.spec1 == "P" and db.contextProfiles.raid == nil)
-  assert(db.version == 4, "version bumped")
+  assert(db.version == 5, "version bumped")
   local n = 0
   for _, k in ipairs(s.columns.order) do if k == "name" then n = n + 1 end; assert(type(k) == "string") end
   assert(n <= 1, "column order deduped")
@@ -991,6 +991,11 @@ test("away from the bank: no cache shows the empty state; /rum guild and /rum ba
   local Guild, Bank = R.GuildUI, R.BankUI
   assert(Guild.frame:IsShown() and #Guild.entries == 0, "guild window opens without a cache")
   assert(Guild.emptyText:GetText() == R.L.emptyGuild and Guild:Char().name == R.L.noGuild, Guild.emptyText:GetText())
+  -- guild info arriving after login: the window names the guild even with nothing cached
+  env.GetGuildInfo = function() return "Bears", "Member", 3, nil end
+  env.__ev("PLAYER_GUILD_UPDATE"); env.__settle(4)
+  assert(Guild:Char().name == "Bears" and Guild.charBtn.text:GetText():find("Bears", 1, true), "guild name shown")
+  assert(R.Data.me.guildKey == "Bears-TestRealm" and Guild.emptyText:GetText() == R.L.emptyGuild)
   env.SlashCmdList.RUMMAGE("bank"); env.__settle(4)
   assert(Bank.frame:IsShown() and Bank.emptyText:GetText() == R.L.emptyBank, Bank.emptyText:GetText())
   -- an alt without a known guild shows the empty state too
@@ -1029,4 +1034,129 @@ test("key bindings toggle the right window (Bindings.xml)", function()
     assert(env["BINDING_NAME_" .. name], "label for " .. name)
   end
   assert(not env.__errors, "errors: " .. tostring(env.__errors and env.__errors[1]))
+end)
+
+---------------------------------------------------------------------------
+-- 1.9.1: Bank / Guild Bank dock beside Bags; columns never overflow
+---------------------------------------------------------------------------
+local function placeBags(R, x, top, scale)
+  local f = R.UI.frame
+  R.settings.scale = scale or 1
+  f:SetScale(scale or 1)
+  f:ClearAllPoints()
+  f:SetPoint("TOPLEFT", f.parent, "BOTTOMLEFT", x / (scale or 1), top / (scale or 1))
+end
+
+test("bank and guild bank open beside Bags with its height and scale", function()
+  local env, R = boot(guildEnv)
+  local Bags, Bank, Guild = R.UI, R.BankUI, R.GuildUI
+  local rect = Bags.ScreenRect
+  -- odd saved geometry, like a window scaled down and parked elsewhere
+  R.settings.bank = { width = 900, height = 300, scale = 0.7, point = { "CENTER", "CENTER", 0, 0 } }
+  R.settings.guild = { width = 460, height = 300, scale = 0.75, point = { "TOP", "TOP", 0, -20 } }
+  Bank:ApplyPosition(); Guild:ApplyPosition()
+  open(env, R)
+  placeBags(R, 1230, 900, 1.05)
+  Bank:Open(); env.__settle(2)
+  local bl, bt, bw, bh = rect(Bags.frame)
+  local kl, kt, kw, kh = rect(Bank.frame)
+  assert(near(Bank.frame:GetScale(), 1.05) and near(kh, bh, 0.5) and near(kt, bt, 0.5), "same scale, height and top")
+  assert(near(Bank.frame:GetWidth(), 680), "no wider than Bags: " .. Bank.frame:GetWidth())
+  assert(near(kl + kw, bl - 6, 0.5), "directly left of Bags")
+  -- guild bank goes beside them without covering either
+  Guild:Open(); env.__settle(2)
+  local gl, gt, gw = rect(Guild.frame)
+  assert(gl + gw <= kl or gl >= bl + bw, "guild doesn't cover the bank or bags")
+  assert(gl >= 0 and gl + gw <= 1920 and near(gt, bt, 0.5), "on screen, aligned: " .. gl)
+  Guild:Close(); Bank:Close()
+  -- Bags at the left edge: they open on its right
+  placeBags(R, 20, 900, 1)
+  Bank:Open(); env.__settle(2)
+  bl, bt, bw = rect(Bags.frame)
+  kl = rect(Bank.frame)
+  assert(near(kl, bl + bw + 6, 0.5), "right of Bags when the left has no room")
+  -- opening Bags pulls an open Bank beside it
+  Bags:Close(); Bank.frame:ClearAllPoints(); Bank.frame:SetPoint("CENTER", Bank.frame.parent, "CENTER", 0, 0)
+  placeBags(R, 1200, 900, 1)
+  Bags:Open(); env.__settle(2)
+  bl, bt = rect(Bags.frame)
+  kl, kt, kw = rect(Bank.frame)
+  assert(near(kl + kw, bl - 6, 0.5) and near(kt, bt, 0.5), "Bank re-docked when Bags opens")
+  -- setting off: saved position is used
+  Bank:Close()
+  R.settings.dockBeside = false
+  R.settings.bank.point = { "CENTER", "CENTER", 0, 0 }
+  Bank:ApplyPosition()
+  Bank:Open(); env.__settle(2)
+  assert(Bank.frame:GetPoint() == "CENTER", "dockBeside off keeps the saved spot")
+  -- vault opening docks too
+  R.settings.dockBeside = true
+  Bags:Close(); Bank:Close()
+  openVault(env)
+  bl = rect(Bags.frame)
+  gl, gt, gw = rect(Guild.frame)
+  assert(near(gl + gw, bl - 6, 0.5), "guild vault: Guild Bank beside Bags")
+  assert(not env.__errors, "errors: " .. tostring(env.__errors and env.__errors[1]))
+end)
+
+test("columns that don't fit a narrow window are left out, never drawn past the edge", function()
+  local env, R = boot()
+  open(env, R)
+  local UI = R.UI
+  UI.frame:SetSize(460, 400); UI:Layout()
+  local width = UI:ListWidth()
+  local names = {}
+  for _, L in ipairs(UI.colLayout) do
+    names[#names + 1] = L.col.key
+    if L.col.key ~= "name" then assert(L.x + L.w <= width + 2, L.col.key .. " overflows: " .. (L.x + L.w) .. " > " .. width) end
+  end
+  local hasName = false
+  for _, k in ipairs(names) do if k == "name" then hasName = true end end
+  assert(hasName, "name column kept")
+  local wide = #UI.colLayout
+  UI.frame:SetSize(1400, 400); UI:Layout()
+  assert(#UI.colLayout >= wide, "wider window shows more columns")
+  assert(UI.colhead.SetClipsChildren, "header clipped")
+end)
+
+test("categories are an icon rail; Bank and Guild Bank keep it on the edge away from Bags", function()
+  local env, R = boot(guildEnv)
+  local Bags, Bank, Guild = R.UI, R.BankUI, R.GuildUI
+  assert(R.settings.compactSidebar == true, "icon rail by default")
+  open(env, R)
+  local b = Bags.catButtons[1]
+  assert(b and not b.text.shown and b.count.shown and b.icon.width == 24, "icon only, count badge")
+  assert(b.count:GetText() ~= nil, "count text")
+  b.scripts.OnEnter(b)
+  assert(env.GameTooltip:GetText() == b.cat.name, "name in the tooltip")
+  assert(Bags.sidebar:GetPoint() == "TOPLEFT" and Bags:RailSide() == "LEFT", "Bags: rail on the left (layout A)")
+  -- Bank docked left of Bags: rail on its left (outer) edge
+  placeBags(R, 1230, 900, 1)
+  Bank:Open(); env.__settle(4)
+  assert(Bank:RailSide() == "LEFT" and Bank.sidebar:GetPoint() == "TOPLEFT", "bank left of Bags: rail left")
+  Bank:Close()
+  -- Bags at the left edge: Bank docks right, rail moves to its right edge, list on the Bags side
+  placeBags(R, 20, 900, 1)
+  Guild:Open(); env.__settle(4)
+  assert(Guild:RailSide() == "RIGHT" and Guild.sidebar:GetPoint() == "TOPRIGHT", "guild right of Bags: rail right")
+  local p, rel, rp = Guild.content:GetPoint(2)
+  assert(p == "BOTTOMRIGHT" and rel == Guild.sidebar and rp == "BOTTOMLEFT", "list sits left of the rail")
+  local gb = Guild.catButtons[1]
+  assert(gb.bar:GetPoint() == "TOPRIGHT", "active bar on the outer edge")
+  -- labelled sidebar still available
+  R.settings.compactSidebar = false
+  Bags:Layout(); Bags:UpdateSidebar()
+  assert(Bags.catButtons[1].text.shown and Bags.addCatBtn.text:GetText() == "+ New category", "labels back")
+  assert(not env.__errors, "errors: " .. tostring(env.__errors and env.__errors[1]))
+end)
+
+test("upgrading to DB v5 turns the icon rail on once", function()
+  local _, R = boot(function(e)
+    e.RummageDB = { version = 4, settings = { compactSidebar = false }, chars = {} }
+  end)
+  assert(R.settings.compactSidebar == true and R.db.version == 5, "migrated")
+  local _, R2 = boot(function(e)
+    e.RummageDB = { version = 5, settings = { compactSidebar = false }, chars = {} }
+  end)
+  assert(R2.settings.compactSidebar == false, "a later choice is kept")
 end)

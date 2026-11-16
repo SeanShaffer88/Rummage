@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.9.1 — 2026-11-16
+
+Fixes from the first in-game look at 1.9.0 on Forever 1.60.1.70938 (`/rum apicheck`: every guild bank API is present). Passes the offline suite (49 cases); the changes themselves are not yet run in game.
+
+- **Categories as an icon rail.** The sidebar shows category icons only, larger, with the item count as a badge and the name in the tooltip; the selected category is highlighted in the accent colour. Saved searches become numbered stubs (the search is in the tooltip) and "+ New category" a "+" button. On by default and switched on once for existing settings (database v5); *Categories as icons only (names on hover)* in Appearance brings the labels back.
+- **Bank and Guild Bank rail on the outer edge.** Docked beside Bags, they keep their icon rail on the side away from Bags, so the item lists face each other where you drag items. Bags keeps its rail on the left.
+- **Bank and Guild Bank open beside Bags.** They now open right next to the Bags window wherever it is (left if there's room, else right, never on top of each other), with the same height and scale as Bags and no wider than it. Opening Bags pulls an already-open Bank or Guild Bank beside it. Setting: *Open Bank and Guild Bank beside Bags* (General); off keeps the old behaviour (where you last left them).
+- **No more overlapping text in Bags.** The search hint is clipped to the search box (it ran over the Preset button once the Bank/Guild buttons made the box narrower), column headers are clipped to the list, and columns that don't fit a narrow window are left out instead of being drawn over the scrollbar and the window edge.
+- **Guild Bank names your guild** before its bank is cached, instead of "No guild": guild info arrives after login and the window now redraws when it does.
+
 ## 1.9.0 — 2026-11-15
 
 Audit against the other bag addons (Baganator, Bagnon, BetterBags, AdiBags, ArkInventory, Sorted, Combuctor, LiteBag); report in `docs/COMPARISON.md`. Passes the offline suite (45 cases); not yet run in game.
