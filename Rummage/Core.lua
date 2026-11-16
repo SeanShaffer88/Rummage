@@ -391,7 +391,7 @@ R.defaults = {
 	favoritesFirst = true,
 	newFirst = false,
 	showSidebar = true,
-	compactSidebar = false,
+	compactSidebar = true,  -- 1.9.1: categories as an icon rail (names in tooltips)
 	replaceBags = true,
 	replaceBank = true,
 	tooltipCounts = true,
@@ -419,6 +419,7 @@ R.defaults = {
 	transferTargets = true, -- Transfer button also sends listed items to an open mail or trade window
 	-- 1.9.0: guild bank window
 	replaceGuildBank = true,  -- hide Blizzard's guild bank and use the Guild Bank window
+	dockBeside = true,        -- Bank / Guild Bank open beside Bags with its height and scale
 	guildOpenBags = true,     -- opening the guild bank also opens Bags beside it
 	guildDefaultTab = "current", -- current (the vault's selected tab) | all
 	guildRightClick = "bags", -- bags (withdraw into the bags) | cursor (pick up) | none
@@ -430,7 +431,7 @@ R.defaults = {
 -- SavedVariables sanitizing. The WTF file is user-editable and may come from an
 -- older or corrupted version, so every value is type-checked, clamped or dropped.
 ---------------------------------------------------------------------------
-local DB_VERSION = 4
+local DB_VERSION = 5
 
 -- Fills missing keys and replaces values whose type differs from the default.
 local function CopyDefaults(src, dst)
@@ -664,6 +665,8 @@ function R:InitDB()
 	for k, v in pairs(db.contextProfiles) do
 		if type(k) ~= "string" or type(v) ~= "string" then db.contextProfiles[k] = nil end
 	end
+	-- v5 (1.9.1): categories become an icon rail for everyone once; the setting stays.
+	if (tonumber(db.version) or 0) < 5 then db.settings.compactSidebar = true end
 	db.version = DB_VERSION
 	R.db = db
 	R.settings = db.settings

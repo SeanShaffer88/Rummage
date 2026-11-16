@@ -316,9 +316,12 @@ end
 function GB:UpdateCharGuild()
 	local me = R.Data.me
 	if not me then return end
+	local before = me.guildKey
 	local key = self:Key()
 	if key then me.guildKey = key
 	elseif _G.IsInGuild and Call("IsInGuild") == false then me.guildKey = nil end
+	-- guild info often arrives after login: redraw the Guild Bank window when it does
+	if me.guildKey ~= before or key then R:RequestRefresh() end
 end
 
 function GB:Init()

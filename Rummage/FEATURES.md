@@ -142,6 +142,14 @@ custom price source, `tsm>` search), Pawn (upgrade arrow and %,
 `pawn>` search), Can I Mog It? (transmog status), Scrap (junk
 list), Syndicator (tooltip counts step aside).
 
+## New in 1.9.1
+
+Bank and Guild Bank open right beside Bags with its height and scale (setting:
+*Open Bank and Guild Bank beside Bags*). No overlapping text in a narrow Bags
+window: the search hint is clipped and columns that don't fit are hidden.
+Categories are an icon rail (names and counts on hover, counts as badges); Bank
+and Guild Bank keep their rail on the edge away from Bags.
+
 ## New in 1.9.0
 
 Features adapted from other bag addons (see `docs/COMPARISON.md`):
