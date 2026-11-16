@@ -3,7 +3,10 @@
 		Rummage.UI:Toggle("bags")
 	</Binding>
 	<Binding name="RUMMAGE_TOGGLE_BANK" category="ADDONS">
-		Rummage.UI:Toggle("bank")
+		Rummage.BankUI:Toggle()
+	</Binding>
+	<Binding name="RUMMAGE_TOGGLE_GUILD" category="ADDONS">
+		Rummage.GuildUI:Toggle()
 	</Binding>
 	<Binding name="RUMMAGE_SEARCH" category="ADDONS">
 		Rummage.UI:FocusSearch()

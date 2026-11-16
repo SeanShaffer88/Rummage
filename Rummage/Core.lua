@@ -171,6 +171,7 @@ end
 BINDING_HEADER_RUMMAGE = "Rummage"
 BINDING_NAME_RUMMAGE_TOGGLE = "Toggle bags"
 BINDING_NAME_RUMMAGE_TOGGLE_BANK = "Toggle bank (cached or live)"
+BINDING_NAME_RUMMAGE_TOGGLE_GUILD = "Toggle guild bank (cached or live)"
 BINDING_NAME_RUMMAGE_SEARCH = "Open bags and focus search"
 
 ---------------------------------------------------------------------------
@@ -180,20 +181,24 @@ BINDING_NAME_RUMMAGE_SEARCH = "Open bags and focus search"
 -- longer option labels migrate incrementally.
 ---------------------------------------------------------------------------
 R.L = {
-	bags = "Bags", bank = "Bank", toGrid = "Grid", toList = "List",
+	bags = "Bags", bank = "Bank", guild = "Guild Bank", guildShort = "Guild", allTabs = "All tabs", toGrid = "Grid", toList = "List",
 	transfer = "Transfer", toBags = "To Bags", toBank = "To Bank",
 	sort = "Sort", restack = "Restack", sellJunk = "Sell Junk",
 	freeFmt = "%d/%d free", cachedBank = "Cached bank",
 	viewTotal = "View", junkTotal = "junk",
 	searchHint = "Search  (e.g. ilvl>20 #boe | q:epic)",
 	emptyBank = "No bank data yet. Visit a banker on this character.",
+	emptyGuild = "No guild bank data yet. Visit your guild bank on this character.",
+	cachedDropBank = "Cached bank: visit a banker to move items into it.",
+	cachedDropGuild = "Cached guild bank: open the guild vault to move items into it.",
+	noGuild = "No guild", cachedGuild = "Cached guild bank",
 	nothingMatches = "Nothing matches.", empty = "Empty.",
 	mmFree = "%d / %d bag slots free",
-	mmBags = "Left-click: bags", mmBank = "Shift/middle-click: bank", mmSettings = "Right-click: settings",
+	mmBags = "Left-click: bags", mmBank = "Shift/middle-click: bank", mmGuild = "Ctrl-click: guild bank", mmSettings = "Right-click: settings",
 	tabGeneral = "General", tabAppearance = "Appearance", tabItems = "Items & Junk",
 	tabColumns = "Columns", tabCategories = "Categories", tabAbout = "About",
 	preset = "Preset",
-	slashUsage = "/rum [bank | search <text> | config | restack | sell | conflicts | keys | reset | upgrade (preview popup) | export | import <string> | apicheck [export] | gold | mail | perf | inventory [csv|text] | autoprofile | savesearch | junklog | buyback [n|all] | debug [report|reset]]",
+	slashUsage = "/rum [bank | guild | search <text> | config | restack | sell | conflicts | keys | reset | upgrade (preview popup) | export | import <string> | apicheck [export] | gold | mail | perf | inventory [csv|text] | autoprofile | savesearch | junklog | buyback [n|all] | debug [report|reset]]",
 }
 do
 	local loc = (GetLocale and GetLocale()) or "enUS"
@@ -351,7 +356,7 @@ R.defaults = {
 	takeoverBagKeys = true,
 	warnConflicts = true,
 	ignoredConflicts = "",
-	autoOpen = { merchant = true, mail = true, auction = true, trade = true, bank = true, other = true },
+	autoOpen = { merchant = true, mail = true, auction = true, trade = true, bank = true, guild = true, other = true },
 	rememberCategory = true, -- restore the last selected category (also across sessions)
 	lastCategory = "all",
 	searchAllChars = false,  -- while searching, look through every character's cached bags
@@ -409,6 +414,16 @@ R.defaults = {
 	sellConfirmQuality = true, -- ask first when a sale includes Uncommon or better
 	autoProfile = false,    -- switch profile by spec / zone type (see /rum autoprofile)
 	upgradeStatDiff = true, -- list stat changes in the upgrade popup
+	-- 1.9.0
+	showCurrencies = true,  -- footer shows the currencies marked "Show on backpack"
+	transferTargets = true, -- Transfer button also sends listed items to an open mail or trade window
+	-- 1.9.0: guild bank window
+	replaceGuildBank = true,  -- hide Blizzard's guild bank and use the Guild Bank window
+	guildOpenBags = true,     -- opening the guild bank also opens Bags beside it
+	guildDefaultTab = "current", -- current (the vault's selected tab) | all
+	guildRightClick = "bags", -- bags (withdraw into the bags) | cursor (pick up) | none
+	guildFooterLimits = true, -- footer shows the withdrawals left for the selected tab
+	tooltipGuildCounts = true, -- tooltips list counts in cached guild banks
 }
 
 ---------------------------------------------------------------------------
@@ -438,6 +453,8 @@ local CLAMP = {
 local ENUMS = {
 	viewMode = { list = true, grid = true },
 	groupBy = { none = true, category = true, type = true, quality = true, bag = true },
+	guildDefaultTab = { current = true, all = true },
+	guildRightClick = { bags = true, cursor = true, none = true },
 }
 
 local function ValidPoint(p)
@@ -476,7 +493,7 @@ local function SanitizeSettings(st)
 	for k, v in pairs(st.collapsed) do if v ~= true then st.collapsed[k] = nil end end
 	-- 1.5.0: per-view layouts. Only the three known views, each { w, h, scale } within bounds.
 	local vs = {}
-	for _, key in ipairs({ "bags", "bank", "all" }) do
+	for _, key in ipairs({ "bags", "bank", "guild", "all" }) do
 		local v = st.viewSizes[key]
 		if type(v) == "table" and type(v.w) == "number" and type(v.h) == "number" and type(v.scale) == "number" then
 			vs[key] = { w = min(4000, max(400, v.w)), h = min(2400, max(300, v.h)), scale = min(2, max(0.5, v.scale)) }
@@ -511,6 +528,46 @@ local function SanitizeChar(c)
 	c.mail = mail
 	if type(c.acquired) ~= "table" then c.acquired = {} end
 	if type(c.money) ~= "number" then c.money = 0 end
+	if c.guildKey ~= nil and type(c.guildKey) ~= "string" then c.guildKey = nil end
+	if c.currencies ~= nil then
+		local cur = {}
+		if type(c.currencies) == "table" then
+			for _, v in ipairs(c.currencies) do
+				if type(v) == "table" and type(v.n) == "string" and type(v.q) == "number" and #cur < 3 then
+					if v.t ~= nil and type(v.t) ~= "number" and type(v.t) ~= "string" then v.t = nil end
+					cur[#cur + 1] = v
+				end
+			end
+		end
+		c.currencies = cur
+	end
+	return true
+end
+
+-- 1.9.0: cached guild banks, ["Guild-Realm"] = { name, realm, money, numTabs, lastSeen,
+-- containers[GUILD_BASE + tab] = { name, icon, size, slots } }. Only guild-tab IDs survive.
+local function SanitizeGuild(g)
+	if type(g) ~= "table" then return false end
+	if type(g.name) ~= "string" then return false end
+	if type(g.realm) ~= "string" then g.realm = nil end
+	if type(g.money) ~= "number" then g.money = 0 end
+	if type(g.lastSeen) ~= "number" then g.lastSeen = nil end
+	g.numTabs = type(g.numTabs) == "number" and min(R.API.MAX_GUILD_TABS, max(0, floor(g.numTabs))) or 0
+	if type(g.containers) ~= "table" then g.containers = {} end
+	for bag, rec in pairs(g.containers) do
+		if not R.API.IsGuildBag(bag) or type(rec) ~= "table" or type(rec.slots) ~= "table" then
+			g.containers[bag] = nil
+		else
+			rec.size = type(rec.size) == "number" and min(R.API.GUILD_SLOTS, max(0, rec.size)) or 0
+			if type(rec.name) ~= "string" then rec.name = "Tab " .. (bag - R.API.GUILD_BASE) end
+			if rec.icon ~= nil and type(rec.icon) ~= "number" and type(rec.icon) ~= "string" then rec.icon = nil end
+			for slot, sl in pairs(rec.slots) do
+				if type(slot) ~= "number" or slot < 1 or slot > R.API.GUILD_SLOTS or not ValidSlot(sl) then rec.slots[slot] = nil
+				elseif type(sl.i) ~= "number" then sl.i = R.ItemID(sl.l) end
+			end
+		end
+	end
+	g.faction = type(g.faction) == "string" and g.faction or nil
 	return true
 end
 
@@ -522,6 +579,10 @@ function R:InitDB()
 	if type(db.chars) ~= "table" then db.chars = {} end
 	for key, c in pairs(db.chars) do
 		if type(key) ~= "string" or not SanitizeChar(c) then db.chars[key] = nil end
+	end
+	if type(db.guilds) ~= "table" then db.guilds = {} end
+	for key, g in pairs(db.guilds) do
+		if type(key) ~= "string" or not SanitizeGuild(g) then db.guilds[key] = nil end
 	end
 	if type(db.favorites) ~= "table" then db.favorites = {} end   -- [itemID] = marker 1-8
 	for id, v in pairs(db.favorites) do
@@ -788,10 +849,13 @@ function R:ImportSettings(str)
 	end
 	SanitizeSettings(newSettings)
 
-	local newCats = {}
-	for i = 1, 50 do
+	-- Walk the indices that are present, in order: a gap (a hand-edited string
+	-- missing cat2) must not drop every category after it.
+	local newCats, idxs = {}, {}
+	for i in pairs(catFields) do if i >= 1 and i <= 50 then idxs[#idxs + 1] = i end end
+	table.sort(idxs)
+	for _, i in ipairs(idxs) do
 		local f = catFields[i]
-		if not f then break end
 		if f.name and f.name ~= "" then
 			local icon = f.icon
 			if icon and tonumber(icon) then icon = tonumber(icon) end

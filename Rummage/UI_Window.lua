@@ -187,19 +187,21 @@ end
 ---------------------------------------------------------------------------
 -- Position, size and per-view layouts
 ---------------------------------------------------------------------------
--- Window "view key": Bags and Bank have their own, any other character's cache
--- (and cross-character search) shares "all".
+-- Window "view key": Bags, Bank and Guild Bank have their own, any other character's
+-- cache (and cross-character search) shares "all".
 function UI:ViewKey()
+	if self.kind == "guild" then return "guild" end
 	if self.charKey or self.searchAllActive then return "all" end
 	return self.view == "bank" and "bank" or "bags"
 end
 
 -- Per-window geometry table: the Bags window uses the main settings (as before 1.8.0),
--- the Bank window keeps its own size, scale, position and per-view layouts.
+-- the Bank and Guild Bank windows keep their own size, scale, position and per-view
+-- layouts (settings.bank / settings.guild).
 function UI:Geo()
-	if self.kind ~= "bank" then return R.settings end
-	local b = R.settings.bank
-	if type(b) ~= "table" then b = {}; R.settings.bank = b end
+	if self.kind == "bags" then return R.settings end
+	local b = R.settings[self.kind]
+	if type(b) ~= "table" then b = {}; R.settings[self.kind] = b end
 	local d = R.defaults
 	b.width = min(4000, max(400, tonumber(b.width) or d.width))
 	b.height = min(2400, max(300, tonumber(b.height) or d.height))
@@ -243,7 +245,7 @@ function UI:ApplyPosition()
 	f:SetScale(s.scale)
 	if s.point then
 		f:SetPoint(s.point[1], UIParent, s.point[2], s.point[3], s.point[4])
-	elseif self.kind == "bank" then
+	elseif self.kind == "bank" or self.kind == "guild" then
 		-- default: just left of the Bags window, so items can be dragged across
 		local bw = (R.settings.width or 560) * (R.settings.scale or 1)
 		f:SetPoint("RIGHT", UIParent, "RIGHT", -(80 + bw + 16) / (s.scale or 1), 0)

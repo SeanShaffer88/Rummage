@@ -18,7 +18,7 @@ local function IsLocked(bag, slot)
 	return locked
 end
 
-function Mover:Busy() return self:IsShown() end
+function Mover:Busy() return self:IsShown() or self.sendTicker ~= nil end
 
 function Mover:Start(planner, label, onDone)
 	if InCombatLockdown() then
@@ -211,6 +211,99 @@ function Mover:EmptyBag(bag)
 		targets = others(API.InvBagList, bag)
 	end
 	self:Start(self:PlanTransfer(sources, targets), "empty")
+end
+
+---------------------------------------------------------------------------
+-- Transfer targets other than the bank (1.9.0): an open Send Mail tab or trade
+-- window. Items are placed with PickupContainerItem + the window's own slot
+-- button, one per tick, so the server can lock each one. Bound items are skipped.
+---------------------------------------------------------------------------
+local TARGETS = {
+	mail = {
+		label = "To Mail",
+		open = function() return SendMailFrame and SendMailFrame:IsShown() and MailFrame and MailFrame:IsShown() end,
+		max = function() return ATTACHMENTS_MAX_SEND or 12 end,
+		used = function(i) return GetSendMailItem and GetSendMailItem(i) ~= nil end,
+		place = function(i) if ClickSendMailItemButton then ClickSendMailItemButton(i); return true end end,
+	},
+	trade = {
+		label = "To Trade",
+		open = function() return TradeFrame and TradeFrame:IsShown() end,
+		-- the last trade slot is "will not be traded"; only the first six change hands
+		max = function() return math.min(6, MAX_TRADABLE_ITEMS or 6) end,
+		used = function(i) return GetTradePlayerItemLink and GetTradePlayerItemLink(i) ~= nil end,
+		place = function(i) if ClickTradeButton then ClickTradeButton(i); return true end end,
+	},
+}
+Mover.targets = TARGETS
+
+-- Footers re-check the target when these windows open/close (and when the mail
+-- window switches between Inbox and Send, which fires no event).
+local function TargetsChanged() R:Fire("MOVER_CHANGED", Mover:Busy()) end
+local function HookShowHide(frame)
+	if frame and not frame.rummageTargetHook and frame.HookScript then
+		frame.rummageTargetHook = true
+		frame:HookScript("OnShow", TargetsChanged)
+		frame:HookScript("OnHide", TargetsChanged)
+	end
+end
+for _, ev in ipairs({ "MAIL_SHOW", "MAIL_CLOSED", "TRADE_SHOW", "TRADE_CLOSED" }) do
+	R:RegisterEvent(ev, function()
+		HookShowHide(_G.SendMailFrame)
+		C_Timer.After(0, TargetsChanged)
+	end)
+end
+
+-- "mail", "trade" or nil: which non-bank transfer target is open right now.
+function Mover:OpenTarget()
+	if not R.settings.transferTargets then return nil end
+	if TARGETS.mail.open() then return "mail" end
+	if TARGETS.trade.open() then return "trade" end
+end
+
+local function FreeTargetSlot(t)
+	for i = 1, t.max() do
+		if not t.used(i) then return i end
+	end
+end
+
+function Mover:SendTo(kind, entries)
+	local t = TARGETS[kind]
+	if not t or not t.open() then return end
+	if InCombatLockdown() then return R:Print("Can't move items in combat.") end
+	if self.sendTicker then return R:Print("Already moving items; please wait.") end
+	local sources = {}
+	for _, e in ipairs(entries) do
+		if not e.bound and not e.foreign then
+			for _, s in ipairs(e.slots) do sources[#sources + 1] = { s[1], s[2], e.link } end
+		end
+	end
+	if #sources == 0 then return R:Print("Nothing listed can be sent (bound items are skipped).") end
+	local i, placed, full = 0, 0, false
+	local function finish()
+		if self.sendTicker then self.sendTicker:Cancel(); self.sendTicker = nil end
+		if GetCursorInfo() then ClearCursor() end
+		local msg = format("Added %d item(s) to the %s.", placed, kind == "mail" and "mail" or "trade")
+		if full then msg = msg .. " It is full; the rest stayed in your bags." end
+		R:Print(msg)
+		R:Fire("MOVER_CHANGED", false)
+	end
+	local function step()
+		if not t.open() or InCombatLockdown() then return finish() end
+		i = i + 1
+		local src = sources[i]
+		if not src then return finish() end
+		local link, _, _, _, locked = API.GetSlotInfo(src[1], src[2])
+		if link ~= src[3] or locked then return end -- moved or busy: skip it
+		local idx = FreeTargetSlot(t)
+		if not idx then full = true; return finish() end
+		API.PickupContainerItem(src[1], src[2])
+		if t.place(idx) then placed = placed + 1 end
+		if GetCursorInfo() then ClearCursor() end
+	end
+	R:Fire("MOVER_CHANGED", true)
+	self.sendTicker = C_Timer.NewTicker(0.15, step)
+	step()
 end
 
 -- Moves the given entries (all their slots) to the other side (bags <-> bank).

@@ -73,6 +73,8 @@ SlashCmdList.RUMMAGE = function(msg)
 		R.UI:Toggle("bags")
 	elseif cmd == "bank" then
 		R.BankUI:Toggle()
+	elseif cmd == "guild" or cmd == "gbank" then
+		R.GuildUI:Toggle()
 	elseif cmd == "config" or cmd == "options" or cmd == "settings" then
 		R.Options:Toggle()
 	elseif cmd == "search" then

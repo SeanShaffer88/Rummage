@@ -2,9 +2,10 @@
 -- Syntax:  words AND together, "|" separates OR groups, "!" negates a term.
 --   plain text        name / type / subtype / slot contains text
 --   #keyword          #fav #new #junk #upgrade #bound #boe #bop #gear #consumable
---                     #quest #trade #recipe #key #usable
+--                     #quest #trade #recipe #key #usable #set, plus plugin keywords
 --   field op value    ilvl>20  lvl<=30  count>5  q:rare  q>=uncommon  type:armor
 --                     sub:cloth  slot:head  bag:2  value>1g  ah>50s  tsm>2g  ilvl:10-20
+--                     set:tank  name:linen
 -- Copyright (C) 2026 Malikor. GPLv3 or later.
 
 local _, ns = ...
@@ -54,12 +55,14 @@ local NUMERIC = {
 }
 local MONEY_FIELDS = { value = true, vendor = true, ah = true, tsm = true }
 
+-- Text getters return lower-case strings (values are lower-cased at compile time).
 local TEXT_FIELDS = {
-	type = function(e) return infoField(e, "type") end,
-	sub = function(e) return infoField(e, "sub") end,
-	subtype = function(e) return infoField(e, "sub") end,
-	slot = function(e) return infoField(e, "slotName") end,
-	name = function(e) return e.name end,
+	type = function(e) return infoField(e, "ltype") end,
+	sub = function(e) return infoField(e, "lsub") end,
+	subtype = function(e) return infoField(e, "lsub") end,
+	slot = function(e) return infoField(e, "lslot") end,
+	name = function(e) return e.lname end,
+	set = function(e) return R.Items:SetNames(e) end,
 }
 
 local KEYWORDS = {
@@ -85,16 +88,43 @@ local KEYWORDS = {
 	recipe = function(e) return infoField(e, "class") == 9 end,
 	key = function(e) return R.Items:IsKey(e) end,
 	usable = function(e) return (infoField(e, "req") or 0) <= UnitLevel("player") end,
+	set = function(e) return R.Items:InSet(e) end,
+	equipset = function(e) return R.Items:InSet(e) end,
 }
+
+-- Plugin keywords (1.9.0): other addons add #name terms with
+-- Rummage:RegisterSearchKeyword(name, function(entry) return bool end).
+-- Built-in keywords cannot be replaced.
+local BUILTIN_KEYWORDS = {}
+for k in pairs(KEYWORDS) do BUILTIN_KEYWORDS[k] = true end
+
+function Search:RegisterKeyword(name, fn)
+	if type(name) ~= "string" or type(fn) ~= "function" then return false end
+	name = name:lower():gsub("^#", "")
+	if name == "" or name:find("[%s|&!]") or BUILTIN_KEYWORDS[name] then return false end
+	KEYWORDS[name] = function(e)
+		local ok, res = pcall(fn, e)
+		return ok and res and true or false
+	end
+	self:ClearCache()
+	return true
+end
+
+function Search:Keywords()
+	local t = {}
+	for k in pairs(KEYWORDS) do t[#t + 1] = k end
+	table.sort(t)
+	return t
+end
 
 local function textTerm(word)
 	return function(e)
 		if e.lname:find(word, 1, true) then return true end
 		local inf = e.info
 		if inf then
-			if inf.type:lower():find(word, 1, true) then return true end
-			if inf.sub:lower():find(word, 1, true) then return true end
-			if inf.slotName ~= "" and inf.slotName:lower():find(word, 1, true) then return true end
+			if inf.ltype:find(word, 1, true) then return true end
+			if inf.lsub:find(word, 1, true) then return true end
+			if inf.lslot ~= "" and inf.lslot:find(word, 1, true) then return true end
 		end
 		return false
 	end
@@ -135,7 +165,7 @@ local function compileTerm(term)
 				local getter = TEXT_FIELDS[field]
 				fn = function(e)
 					local v = getter(e)
-					return v ~= nil and v:lower():find(value, 1, true) ~= nil
+					return v ~= nil and v:find(value, 1, true) ~= nil
 				end
 			end
 		else
@@ -199,6 +229,10 @@ function Search:CompileUncached(query)
 	end
 	cache[query] = pred
 	return pred
+end
+
+function Search:ClearCache()
+	wipe(rawCache); wipe(cache); rawCount = 0
 end
 
 function Search:Matches(query, e)

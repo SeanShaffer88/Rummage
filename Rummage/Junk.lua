@@ -74,7 +74,8 @@ function Junk:Collect()
 					local inf = R.Items:Info(link)
 					local e = { id = itemID or R.ItemID(link), bag = bag, slot = slot, quality = inf and inf.quality or quality,
 						link = link, count = count or 1, info = inf, name = inf and inf.name, lname = inf and inf.lname }
-					local protected = R.settings.protectFavorites and R.db.favorites[e.id]
+					-- favorites (setting) and equipment-set items (always) are never sold
+					local protected = (R.settings.protectFavorites and R.db.favorites[e.id]) or R.Items:InSet(e)
 					if inf and inf.sell > 0 and not noValue and not protected and self:IsJunk(e) then
 						local v = inf.sell * (count or 1)
 						list[#list + 1] = { bag, slot, v, e.quality or 0, link, count or 1 }
@@ -95,7 +96,11 @@ function Junk:AutoRepair()
 	if not R.settings.autoRepair or not (CanMerchantRepair and CanMerchantRepair()) then return end
 	local cost, canRepair = GetRepairAllCost()
 	if not canRepair or not cost or cost <= 0 then return end
-	if R.settings.autoRepairGuild and CanGuildBankRepair and CanGuildBankRepair() then
+	-- Guild repair only when the guild will actually pay: the daily withdraw limit
+	-- (-1 = unlimited) must cover the cost, otherwise fall back to own gold.
+	local guildFunds = GetGuildBankWithdrawMoney and GetGuildBankWithdrawMoney()
+	local guildCovers = guildFunds == nil or guildFunds == -1 or guildFunds >= cost
+	if R.settings.autoRepairGuild and CanGuildBankRepair and CanGuildBankRepair() and guildCovers then
 		RepairAllItems(true)
 		R:Print("Repaired with guild funds for " .. R.FormatMoney(cost) .. ".")
 	elseif GetMoney() >= cost then
@@ -144,23 +149,29 @@ function Junk:SellAll(confirmed)
 		return
 	end
 	local i = 0
-	local sold = 0
-	local function step()
-		if not MerchantOpen() then
-			self.ticker:Cancel(); self.ticker = nil
-			return
+	local sold, soldValue = 0, 0
+	local function finish(stopped)
+		self.ticker:Cancel(); self.ticker = nil
+		if sold > 0 then
+			R:Print(format("Sold %d junk item(s) for %s%s. /rum buyback undoes the last sale.", sold,
+				R.FormatMoney(soldValue), stopped and " (merchant closed)" or ""))
 		end
+	end
+	local function step()
+		if not MerchantOpen() then return finish(true) end
 		for _ = 1, 10 do
 			i = i + 1
 			local it = list[i]
-			if not it then
-				self.ticker:Cancel(); self.ticker = nil
-				R:Print(format("Sold %d junk item(s) for %s. /rum buyback undoes the last sale.", sold, R.FormatMoney(total)))
-				return
+			if not it then return finish(false) end
+			-- The sale runs over several ticks; re-check the slot so an item moved into
+			-- it since Collect() (or a stack that changed) is never sold by mistake.
+			local link, _, _, _, locked = API.GetSlotInfo(it[1], it[2])
+			if link == it[5] and not locked then
+				LogSale(it)
+				API.UseContainerItem(it[1], it[2])
+				sold = sold + 1
+				soldValue = soldValue + (it[3] or 0)
 			end
-			LogSale(it)
-			API.UseContainerItem(it[1], it[2])
-			sold = sold + 1
 		end
 	end
 	self.ticker = C_Timer.NewTicker(0.25, step)
@@ -178,17 +189,26 @@ function Junk:Buyback(n)
 	end
 	local log = R.db.junkLog
 	if type(n) == "string" and n:lower() == "all" then
-		local bought = 0
-		for i = #log, 1, -1 do
-			for b = 1, GetNumBuybackItems() or 0 do
-				if GetBuybackItemLink(b) == log[i].link then
-					BuybackItem(b)
-					table.remove(log, i)
-					bought = bought + 1
+		-- Plan first, then buy. BuybackItem is answered by the server later, so the
+		-- list does not shrink between calls: each buyback index is claimed once, and
+		-- indices are bought highest first so earlier ones cannot shift underneath.
+		local claimed, picks, logHits = {}, {}, {}
+		local numBuyback = GetNumBuybackItems() or 0
+		for i = 1, #log do
+			for b = 1, numBuyback do
+				if not claimed[b] and GetBuybackItemLink(b) == log[i].link then
+					claimed[b] = true
+					picks[#picks + 1] = b
+					logHits[#logHits + 1] = i
 					break
 				end
 			end
 		end
+		table.sort(picks, function(a, b) return a > b end)
+		for _, b in ipairs(picks) do BuybackItem(b) end
+		table.sort(logHits, function(a, b) return a > b end)
+		for _, i in ipairs(logHits) do table.remove(log, i) end
+		local bought = #picks
 		R:Print(bought > 0 and ("Bought back " .. bought .. " item(s).") or "Nothing from the log is in the merchant's buyback list.")
 		return
 	end

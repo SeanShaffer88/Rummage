@@ -105,7 +105,66 @@ function UI:BuildAllChars(view)
 	return out
 end
 
+-- Guild Bank window: pick a cached guild (the open vault's guild is first).
+function UI:ShowGuildMenu(anchor)
+	local items = { { text = "Guild banks", isTitle = true } }
+	local current = self:Char()
+	local GB = R.GuildBank
+	local list = GB:SortedGuilds()
+	if #list == 0 then items[#items + 1] = { text = "|cff888888No guild bank cached yet|r", disabled = true } end
+	local mine = GB:Key()
+	for _, entry in ipairs(list) do
+		local g = entry.g
+		local label = "|cff40c040" .. (g.name or entry.key) .. "|r"
+		if g.realm and g.realm ~= GetRealmName() then label = label .. " |cff888888- " .. g.realm .. "|r" end
+		if g.lastSeen then
+			local age = R.FormatAge(g.lastSeen)
+			if age ~= "" then label = label .. " |cff777777" .. age .. " ago|r" end
+		end
+		local item = {
+			text = label, checked = g == current,
+			func = function()
+				UI.guildKey = (entry.key ~= mine) and entry.key or nil
+				UI.offset = 0
+				UI.bagFilter = nil
+				R:RequestRefresh()
+			end,
+		}
+		if not GB:IsLive(g) then
+			item.onDelete = function()
+				R.db.guilds[entry.key] = nil
+				if UI.guildKey == entry.key then UI.guildKey = nil end
+				R:Print("Forgot the cached guild bank of " .. (g.name or entry.key) .. ".")
+				R:Fire("DATA_CHANGED")
+			end
+		end
+		items[#items + 1] = item
+	end
+	W:Menu(anchor, items)
+end
+
+-- Guild Bank window: all tabs or one tab (also selects it in the open vault).
+function UI:ShowGuildTabMenu(anchor)
+	local c = self:Char()
+	local cur = self:GuildTab()
+	local items = { { text = "Guild bank tab", isTitle = true },
+		{ text = R.L.allTabs, checked = cur == nil, func = function() UI:SetGuildTab(nil) end } }
+	for tab = 1, API.MAX_GUILD_TABS do
+		local rec = c.containers[API.GUILD_BASE + tab]
+		if rec then
+			local used = 0
+			for _ in pairs(rec.slots) do used = used + 1 end
+			local label = (rec.icon and ("|T" .. rec.icon .. ":14|t ") or "") .. (rec.name or ("Tab " .. tab))
+			if (rec.size or 0) == 0 then label = label .. " |cff888888(no access)|r"
+			else label = label .. " |cff888888" .. used .. "/" .. rec.size .. "|r" end
+			items[#items + 1] = { text = label, checked = cur == tab, func = function() UI:SetGuildTab(tab) end }
+		end
+	end
+	W:Menu(anchor, items)
+end
+
 function UI:ShowCharMenu(anchor)
+	if self.kind == "guild" then return self:ShowGuildMenu(anchor) end
 	local items = { { text = "Characters", isTitle = true } }
 	local current = self:Char()
 	for _, entry in ipairs(R.Data:SortedChars()) do
@@ -347,7 +406,7 @@ end
 function UI:ShowTextWindow(title, text)
 	local f = self.textWindow
 	if not f then
-		f = CreateFrame("Frame", "RummageTextWindow" .. (UI.kind == "bank" and "Bank" or ""), UIParent, API.Backdrop)
+		f = CreateFrame("Frame", "RummageTextWindow" .. UI.suffix, UIParent, API.Backdrop)
 		f:SetSize(520, 360)
 		f:SetPoint("CENTER")
 		f:SetFrameStrata("DIALOG")
@@ -358,7 +417,7 @@ function UI:ShowTextWindow(title, text)
 		f:SetScript("OnDragStop", f.StopMovingOrSizing)
 		f.title = W:Text(f, "normal")
 		f.title:SetPoint("TOPLEFT", 12, -10)
-		local scroll = CreateFrame("ScrollFrame", "RummageTextWindowScroll" .. (UI.kind == "bank" and "Bank" or ""), f, "UIPanelScrollFrameTemplate")
+		local scroll = CreateFrame("ScrollFrame", "RummageTextWindowScroll" .. UI.suffix, f, "UIPanelScrollFrameTemplate")
 		scroll:SetPoint("TOPLEFT", 12, -34)
 		scroll:SetPoint("BOTTOMRIGHT", -30, 40)
 		local eb = CreateFrame("EditBox", nil, scroll)
@@ -371,7 +430,7 @@ function UI:ShowTextWindow(title, text)
 		f.edit = eb
 		local close = W:Button(f, CLOSE, 80, 22, function() f:Hide() end)
 		close:SetPoint("BOTTOMRIGHT", -12, 10)
-		tinsert(UISpecialFrames, "RummageTextWindow" .. (UI.kind == "bank" and "Bank" or ""))
+		tinsert(UISpecialFrames, "RummageTextWindow" .. UI.suffix)
 		self.textWindow = f
 	end
 	f.title:SetText(title or "")

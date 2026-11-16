@@ -1,6 +1,6 @@
 # Rummage — Features
 
-The full feature list for Rummage 1.8.0 for WoW Forever
+The full feature list for Rummage 1.9.0 for WoW Forever
 (Interface 16001). For the short version see `README.md`; for
 store-listing copy see `DESCRIPTION.md`.
 
@@ -48,7 +48,7 @@ Rummage is by Malikor, GPLv3 or later.
 | `type:armor`, `sub:cloth`, `slot:head` | item type / subtype / equip slot |
 | `count>5`, `bag:2` | stack size / bag number |
 | `value>1g`, `ah>50s`, `tsm>2g`, `pawn>5` | vendor, Auctionator, TSM value; Pawn upgrade % |
-| `#fav #new #junk #upgrade #boe #bop #bound #gear #consumable #quest #trade #recipe #key #usable` | keywords |
+| `#fav #new #junk #upgrade #boe #bop #bound #gear #consumable #quest #trade #recipe #key #usable #set` | keywords (plus any a plugin adds) |
 | `a b` / `a & b` | AND |
 | `a \| b` | OR |
 | `!term` | NOT |
@@ -142,6 +142,28 @@ custom price source, `tsm>` search), Pawn (upgrade arrow and %,
 `pawn>` search), Can I Mog It? (transmog status), Scrap (junk
 list), Syndicator (tooltip counts step aside).
 
+## New in 1.9.0
+
+Features adapted from other bag addons (see `docs/COMPARISON.md`):
+**Transfer to mail or trade** (Baganator), **tracked currencies** in the footer
+(Sorted, Bagnon, Baganator), **equipment sets** in search (`#set`, `set:name`) and
+never sold as junk (Sorted, AdiBags, ArkInventory), and a **plugin API** for other
+addons: search keywords, sidebar categories and columns (BetterBags, AdiBags,
+Baganator). Plus safety fixes to junk selling, buyback and guild repair.
+
+**Guild Bank window** (Baganator, Bagnon, Sorted, ArkInventory): the guild vault
+opens in its own window beside Bags, with its own position, size and scale. Drag
+items between Bags, Guild Bank and Bank; drop on the window to deposit into the
+selected tab, click/drag to pick up, right-click to withdraw into the bags. Daily
+withdrawal limits and deposit rights are respected. Tab selector in the header
+and tab icons in the footer. Cached per guild and viewable anywhere (view-only),
+with counts in item tooltips. Everything is configurable under *Guild bank* in
+the General settings tab. `/rum guild` toggles it.
+
+**Bank and Guild Bank anywhere:** the Bags header's **Bank** and **Guild** buttons
+open those windows beside Bags with their cached contents (view-only) when you're
+away. Browsing an alt shows that alt's guild bank.
+
 ## New in 1.8.0
 
 Bank in its own window beside Bags: drag items between them. Each window has its
@@ -170,7 +192,7 @@ upgrade popup stat diff, secret-value-safe tooltip reads, `/rum apicheck`.
 
 ## Commands
 
-`/rum` toggle bags · `/rum bank` · `/rum search <text>` ·
+`/rum` toggle bags · `/rum bank` · `/rum guild` · `/rum search <text>` ·
 `/rum config` · `/rum restack` · `/rum sell` · `/rum conflicts` ·
 `/rum keys` · `/rum upgrade` · `/rum export` · `/rum import` ·
 `/rum apicheck` · `/rum inventory [csv|text]` · `/rum autoprofile` ·

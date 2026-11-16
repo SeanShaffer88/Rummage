@@ -38,8 +38,9 @@ Rummage puts every item you own into one sortable table: full item names, item l
 | `q:rare`, `q>=uncommon` | quality (poor, common, uncommon, rare, epic, legendary) |
 | `type:armor`, `sub:cloth`, `slot:head` | item type / subtype / equip slot |
 | `count>5`, `bag:2` | stack size / bag number |
+| `#set`, `set:tank` | in any equipment set / in a set whose name contains "tank" |
 | `value>1g`, `ah>50s`, `tsm>2g`, `pawn>5` | vendor, Auctionator, TSM value; Pawn upgrade % |
-| `#fav #new #junk #upgrade #boe #bop #bound #gear #consumable #quest #trade #recipe #key #usable` | keywords |
+| `#fav #new #junk #upgrade #boe #bop #bound #gear #consumable #quest #trade #recipe #key #usable #set` | keywords (plus any a plugin adds) |
 | `a b` / `a & b` | AND |
 | `a \| b` | OR |
 | `!term` | NOT |
@@ -70,7 +71,7 @@ Rummage puts every item you own into one sortable table: full item names, item l
 - One-click **Sell Junk** or auto-sell; favorites are never sold; optional buyback-safe mode (max 12)
 - Auto-repair (guild funds first, if available)
 - **Restack** partial stacks; Blizzard sort when the client provides it
-- **Transfer**: moves everything currently listed (after search/filters) bags ⇄ bank
+- **Transfer**: moves everything currently listed (after search/filters) bags ⇄ bank; with the Send Mail tab or a trade open it adds the listed items there instead (bound items skipped)
 - **Empty a bag**: right-click its icon
 - Drop the cursor item onto empty list space to put it in a free slot
 - Low-bag-space warning
@@ -148,7 +149,7 @@ Extract the `Rummage` folder into
 ## Notes
 
 - Item list changes that happen while in combat are applied as soon as combat ends.
-- Guild bank and equipment sets are not shown (WoW Forever has neither).
+- The Guild Bank window needs the client's guild bank APIs; `/rum apicheck` shows whether they exist. Without them it stays empty and Blizzard's guild bank is left alone.
 - EllesmereUI's own Bags module can't be detected automatically; if you enable it, disable one of the two.
 
 ## License

@@ -422,7 +422,7 @@ end)
 
 test("every documented slash command runs without errors", function()
   local env, R = boot()
-  for _, cmd in ipairs({ "", "bank", "config", "search foo", "restack", "conflicts", "reset", "keys", "export", "apicheck",
+  for _, cmd in ipairs({ "", "bank", "guild", "config", "search foo", "restack", "conflicts", "reset", "keys", "export", "apicheck",
     "inventory text", "autoprofile", "autoprofile on", "autoprofile off", "savesearch", "junklog", "buyback", "buyback all", "gold", "mail", "perf", "apicheck export", "debug report", "bogus" }) do
     env.SlashCmdList.RUMMAGE(cmd)
     env.__settle(2)
@@ -527,6 +527,506 @@ test("settings window: every tab builds inside a scroll frame without errors", f
     local page = R.Options.pages[tab]
     assert(page and page.content and page.stacker, tab .. " page not built")
     assert(page.content:GetHeight() >= 10, tab .. " content height")
+  end
+  assert(not env.__errors, "errors: " .. tostring(env.__errors and env.__errors[1]))
+end)
+
+---------------------------------------------------------------------------
+-- 1.9.0: audit fixes
+---------------------------------------------------------------------------
+test("junk sale re-checks each slot: an item swapped in mid-sale is not sold", function()
+  local env, R = boot()
+  env.__bags[0].size = 16
+  for s = 1, 12 do env.__addItem(0, s, 100 + s, 1, { name = "Grey" .. s, quality = 0, sell = 10 }) end
+  env.MerchantFrame.shown = true
+  R.Data:ScanInventory()
+  R.Junk:SellAll()                 -- first step sells 10
+  assert(#env.__used == 10, "first step " .. #env.__used)
+  env.__addItem(0, 11, 900, 1, { name = "Precious", quality = 4, sell = 99999 })
+  env.__tick(2)
+  for _, u in ipairs(env.__used) do assert(not (u[1] == 0 and u[2] == 11), "sold the swapped-in item") end
+  assert(#env.__used == 11, "slot 12 still sold, got " .. #env.__used)
+  assert(chatHas(env, "Sold 11 junk"), "reports what was really sold")
+end)
+
+test("buyback all claims each buyback slot once and buys highest index first", function()
+  local env, R = boot()
+  env.MerchantFrame.shown = true
+  R.db.junkLog = {
+    { t = 1, link = "[Rag]", count = 1, value = 5 },
+    { t = 1, link = "[Rag]", count = 1, value = 5 },
+    { t = 1, link = "[Rock]", count = 1, value = 5 },
+  }
+  env.__buyback = { { link = "[Rag]" }, { link = "[Other]" }, { link = "[Rock]" } }
+  local calls = {}
+  env.BuybackItem = function(i) calls[#calls + 1] = i end   -- server answers later: list unchanged
+  R.Junk:Buyback("all")
+  assert(#calls == 2 and calls[1] == 3 and calls[2] == 1, "calls " .. table.concat(calls, ","))
+  assert(#R.db.junkLog == 1 and R.db.junkLog[1].link == "[Rag]", "one unmatched Rag stays logged")
+end)
+
+test("auto-repair uses guild funds only when the withdraw limit covers the cost", function()
+  local env, R = boot()
+  R.settings.autoRepair, R.settings.autoRepairGuild = true, true
+  local paidByGuild
+  env.CanMerchantRepair = function() return true end
+  env.GetRepairAllCost = function() return 5000, true end
+  env.CanGuildBankRepair = function() return true end
+  env.GetMoney = function() return 100000 end
+  env.RepairAllItems = function(guild) paidByGuild = guild and true or false end
+  env.GetGuildBankWithdrawMoney = function() return 1000 end
+  R.Junk:AutoRepair()
+  assert(paidByGuild == false, "limit too low: own gold")
+  env.GetGuildBankWithdrawMoney = function() return -1 end
+  R.Junk:AutoRepair()
+  assert(paidByGuild == true, "unlimited: guild")
+end)
+
+test("settings import keeps categories after a missing index", function()
+  local env, R = boot()
+  assert(R:ImportSettings("RUM1;cat1.name=A;cat1.query=linen;cat3.name=C;cat3.query=#boe"))
+  assert(#R.db.categories == 2 and R.db.categories[2].name == "C", "got " .. #R.db.categories)
+end)
+
+test("Can I Mog It? gets slot coordinates only for live views", function()
+  local seen = {}
+  local env, R = boot(function(e)
+    e.CanIMogIt = { GetTooltipText = function(_, link, bag, slot) seen[#seen + 1] = { bag, slot }; return "ok" end }
+  end)
+  env.__addItem(0, 1, 300, 1, { name = "Helm", equip = "INVTYPE_HEAD", class = 4 })
+  R.Data:ScanInventory()
+  local e = { link = env.__bags[0][1].link, id = 300, count = 1, bag = 0, slot = 1, slots = { { 0, 1 } }, vals = {} }
+  R.Items:Prepare(e, R.Data.me, true, true)
+  R.Columns.byKey.cimi.value(e)
+  R.Items:Prepare(e, R.Data.me, false, false)
+  R.Columns.byKey.cimi.value(e)
+  assert(seen[1][1] == 0 and seen[1][2] == 1, "live gets bag/slot")
+  assert(seen[2][1] == nil and seen[2][2] == nil, "cached gets none")
+end)
+
+---------------------------------------------------------------------------
+-- 1.9.0: features adapted from other bag addons
+---------------------------------------------------------------------------
+local function setsEnv(e)
+  e.C_EquipmentSet = {
+    GetEquipmentSetIDs = function() return { 1, 2 } end,
+    GetEquipmentSetInfo = function(id) return id == 1 and "Tank" or "Fishing" end,
+    GetItemIDs = function(id) return id == 1 and { [1] = 400, [5] = 401 } or { [16] = 402, [1] = 400 } end,
+  }
+end
+
+test("equipment sets: #set and set:name search; set items are never sold", function()
+  local env, R = boot(setsEnv)
+  env.__addItem(0, 1, 400, 1, { name = "Helm", quality = 0, sell = 100 })
+  env.__addItem(0, 2, 402, 1, { name = "Pole", quality = 1, sell = 100 })
+  env.__addItem(0, 3, 403, 1, { name = "Rag", quality = 0, sell = 100 })
+  R.Data:ScanInventory()
+  local function e(id) return { link = "x", id = id, count = 1, lname = "x" } end
+  assert(R.Search:Matches("#set", e(400)) and not R.Search:Matches("#set", e(403)))
+  assert(R.Search:Matches("set:tank", e(400)) and R.Search:Matches("set:fish", e(400)), "item in two sets")
+  assert(not R.Search:Matches("set:tank", e(402)) and R.Search:Matches("set:fishing", e(402)))
+  env.MerchantFrame.shown = true
+  local list = R.Junk:Collect()
+  assert(#list == 1 and list[1][2] == 3, "only the non-set grey sells, got " .. #list)
+  assert(#R.Items:SetList() == 2)
+end)
+
+test("plugin API: keyword, category and column; plugin errors are contained", function()
+  local env, R = boot()
+  open(env, R)
+  assert(R:GetAPIVersion() == 1)
+  assert(R:RegisterSearchKeyword("cheap", function(e) return (e.info and e.info.sell or 0) < 20 end))
+  assert(not R:RegisterSearchKeyword("junk", function() return true end), "built-ins are protected")
+  assert(R:RegisterSearchKeyword("boom", function() error("plugin bug") end))
+  env.__addItem(0, 1, 500, 1, { name = "Pebble", sell = 5 })
+  env.__addItem(0, 2, 501, 1, { name = "Gem", sell = 5000 })
+  env.__ev("BAG_UPDATE", 0); env.__ev("BAG_UPDATE_DELAYED"); env.__settle(4)
+  local id = R:RegisterCategory("cheap", "Cheap stuff", nil, function(e) return R.Search:Matches("#cheap", e) end)
+  assert(id == "plugin:cheap" and R.Categories:Get(id))
+  R:RegisterColumn({ key = "plug", title = "Plug", value = function(e) return e.count * 2 end })
+  assert(not R:RegisterColumn({ key = "plug", title = "Dup", value = function() end }), "duplicate key")
+  env.__settle(4)
+  assert(R.UI.catCounts[id] == 1, "plugin category count " .. tostring(R.UI.catCounts[id]))
+  assert(R.Columns.byKey.plug and R.Columns:ValueOf("plug", R.UI.entries[1]) == 2)
+  R.UI.search = "#boom"; R:RequestRefresh(); env.__settle(4)
+  assert(#R.UI.entries == 0 and not env.__errors, "erroring keyword matches nothing, no error")
+  R:UnregisterCategory("cheap")
+  assert(not R.Categories:Get(id))
+end)
+
+test("currencies: backpack-tracked currencies are stored and shown in the footer", function()
+  local env, R = boot(function(e)
+    e.C_CurrencyInfo = { GetBackpackCurrencyInfo = function(i)
+      if i == 1 then return { name = "Honor", quantity = 1234, iconFileID = 111, currencyTypesID = 1 } end
+      if i == 2 then return { name = "Marks", quantity = 7, iconFileID = 222, currencyTypesID = 2 } end
+    end }
+  end)
+  open(env, R)
+  local cur = R.Data.me.currencies
+  assert(#cur == 2 and cur[1].q == 1234 and cur[2].n == "Marks")
+  local txt = R.UI.currencyText:GetText()
+  assert(txt:find("1234", 1, true) and txt:find("|T222:0|t 7", 1, true), txt)
+  R.settings.showCurrencies = false; R.UI:UpdateFooter()
+  assert(R.UI.currencyText:GetText() == "")
+  local _, R2 = boot(function(e)
+    e.RummageDB = { version = 4, settings = {}, chars = { ["Alt-R"] = { containers = {}, currencies = { "bad", { n = "Ok", q = 3 }, { n = 5 } } } } }
+  end)
+  local c2 = R2.db.chars["Alt-R"].currencies
+  assert(#c2 == 1 and c2[1].n == "Ok", "sanitizer keeps only valid entries")
+end)
+
+test("transfer to mail: Send tab open adds listed unbound items, stops when full", function()
+  local env, R = boot()
+  open(env, R)
+  env.MailFrame = env.CreateFrame("Frame", "MailFrame"); env.MailFrame.shown = true
+  env.SendMailFrame = env.CreateFrame("Frame", "SendMailFrame"); env.SendMailFrame.shown = true
+  env.ATTACHMENTS_MAX_SEND = 1
+  local attached = {}
+  env.GetSendMailItem = function(i) return attached[i] end
+  env.ClickSendMailItemButton = function(i) attached[i] = env.__picked end
+  env.__addItem(0, 1, 600, 1, { name = "Ore" })
+  env.__addItem(0, 2, 601, 1, { name = "Bar" })
+  env.__addItem(0, 3, 602, 1, { name = "Gem" })
+  env.__ev("BAG_UPDATE", 0); env.__ev("BAG_UPDATE_DELAYED"); env.__settle(4)
+  assert(R.Mover:OpenTarget() == "mail")
+  R.UI:UpdateFooter()
+  assert(R.UI.btnTransfer:IsShown() and R.UI.transferTarget == "mail", "To Mail button")
+  local boundE = R.UI.entries[1]
+  boundE.bound = true               -- the first listed item is bound: skipped
+  R.UI:DoTransfer()
+  env.__tick(5)
+  assert(attached[1] and not attached[2], "one attached")
+  assert(not (attached[1][1] == boundE.bag and attached[1][2] == boundE.slot), "bound item skipped")
+  assert(chatHas(env, "Added 1 item(s) to the mail") and chatHas(env, "full"), "reports full")
+  assert(not R.Mover:Busy())
+  R.settings.transferTargets = false
+  assert(R.Mover:OpenTarget() == nil, "setting off")
+end)
+
+---------------------------------------------------------------------------
+-- 1.9.0: Guild Bank window
+---------------------------------------------------------------------------
+-- Fake guild vault: two tabs ("Mats": deposit, 2 withdrawals left; "Officer": no deposit).
+local function guildEnv(e)
+  local gb = { current = 1, queried = {}, closed = 0, cursor = false, items = { {}, {} },
+    tabs = { { name = "Mats", icon = 111, view = true, dep = true, rem = 2 },
+             { name = "Officer", icon = 222, view = true, dep = false, rem = 0 } } }
+  e.__gb = gb
+  e.GetGuildInfo = function() return "Lions", "Member", 3, nil end
+  e.GetNumGuildBankTabs = function() return #gb.tabs end
+  e.GetGuildBankTabInfo = function(t) local x = gb.tabs[t]; if x then return x.name, x.icon, x.view, x.dep, 5, x.rem end end
+  e.GetGuildBankItemLink = function(t, s) local it = gb.items[t] and gb.items[t][s]; return it and it.link end
+  e.GetGuildBankItemInfo = function(t, s)
+    local it = gb.items[t] and gb.items[t][s]
+    if it then return 134400, it.count, false, false, 1 end
+  end
+  e.QueryGuildBankTab = function(t) gb.queried[#gb.queried + 1] = t end
+  e.GetCurrentGuildBankTab = function() return gb.current end
+  e.SetCurrentGuildBankTab = function(t) gb.current = t end
+  e.PickupGuildBankItem = function(t, s) gb.picked = { t, s } end
+  e.AutoStoreGuildBankItem = function(t, s) gb.stored = { t, s } end
+  e.GetGuildBankMoney = function() return 5000 end
+  e.CloseGuildBankFrame = function() gb.closed = gb.closed + 1 end
+  e.CursorHasItem = function() return gb.cursor end
+  e.GuildBankFrame = e.CreateFrame("Frame", "GuildBankFrame")
+  e.GuildBankFrame.shown = false
+  gb.add = function(tab, slot, id, count, name)
+    e.__items[id] = { name = name or ("Item" .. id), quality = 1 }
+    gb.items[tab][slot] = { link = "|cffffffff|Hitem:" .. id .. "::::::::60:::::|h[" .. (name or ("Item" .. id)) .. "]|h|r", count = count or 1 }
+  end
+  gb.add(1, 1, 700, 20, "Copper Ore")
+  gb.add(1, 2, 701, 1, "Lion Banner")
+  gb.add(2, 1, 700, 5, "Copper Ore")
+end
+
+-- Opens the vault and answers every tab query.
+local function openVault(env)
+  env.__ev("GUILDBANKFRAME_OPENED"); env.__settle(2)
+  for _ = 1, 3 do env.__ev("GUILDBANKBAGSLOTS_CHANGED"); env.__settle(2) end
+end
+
+test("guild bank: opens in its own window beside Bags, each with its own geometry", function()
+  local env, R = boot(guildEnv)
+  local Bags, Bank, Guild = R.UI, R.BankUI, R.GuildUI
+  assert(Guild and Guild.frame and Guild.frame ~= Bags.frame and Guild.frame ~= Bank.frame, "third window")
+  assert(Guild.view == "guild" and env.GuildBankFrame.rummageHidden, "Blizzard's guild bank hidden")
+  assert(not Bags.frame:IsShown())
+  openVault(env)
+  assert(Guild.frame:IsShown() and Bags.frame:IsShown(), "vault opens Guild Bank and Bags")
+  assert(Guild.frame:GetRight() <= Bags.frame:GetLeft(), "Guild Bank sits left of Bags")
+  -- independent geometry
+  Guild.frame:SetSize(700, 450)
+  Guild:SavePosition()
+  assert(R.settings.guild.width == 700 and R.settings.guild.height == 450, "guild geometry stored apart")
+  assert(R.settings.width ~= 700 and (not R.settings.bank or R.settings.bank.width ~= 700), "bags/bank untouched")
+  Bags.frame:SetSize(820, 500); Bags:SavePosition()
+  assert(R.settings.guild.width == 700 and R.settings.width == 820)
+  Guild:ResetPosition()
+  assert(R.settings.guild.width == R.defaults.width and R.settings.width == 820, "guild reset leaves bags alone")
+  -- Bank and Guild Bank can be open together with Bags
+  Bank:Open(); env.__settle(2)
+  assert(Bank.frame:IsShown() and Guild.frame:IsShown() and Bags.frame:IsShown())
+  Bank:Close()
+  -- closing Bags keeps the vault open; leaving the vault closes what it opened
+  Bags:Close()
+  assert(env.__gb.closed == 0, "closing Bags must not close the vault")
+  env.__ev("GUILDBANKFRAME_CLOSED"); env.__settle(2)
+  assert(not Guild.frame:IsShown(), "leaving closes the Guild Bank window")
+  openVault(env)
+  assert(Bags.frame:IsShown(), "Bags reopened beside it")
+  env.__ev("GUILDBANKFRAME_CLOSED"); env.__settle(2)
+  assert(not Bags.frame:IsShown(), "Bags closes again when the visit opened it")
+  openVault(env)
+  Guild:Close()
+  assert(env.__gb.closed == 1, "closing the Guild Bank window closes the vault")
+  -- setting: don't open Bags beside it
+  env.__ev("GUILDBANKFRAME_CLOSED"); env.__settle(2)
+  Bags:Close()
+  R.settings.guildOpenBags = false
+  openVault(env)
+  assert(Guild.frame:IsShown() and not Bags.frame:IsShown(), "guildOpenBags off")
+  assert(not env.__errors, "errors: " .. tostring(env.__errors and env.__errors[1]))
+end)
+
+test("guild bank: tabs are queried one by one, scanned and cached per guild", function()
+  local env, R = boot(guildEnv)
+  env.__ev("GUILDBANKFRAME_OPENED"); env.__settle(2)
+  assert(#env.__gb.queried == 1 and env.__gb.queried[1] == 1, "current tab queried first")
+  env.__ev("GUILDBANKBAGSLOTS_CHANGED"); env.__settle(2)
+  assert(env.__gb.queried[2] == 2 and R.GuildBank:IsLoaded(1) and not R.GuildBank:IsLoaded(2), "then the next")
+  env.__ev("GUILDBANKBAGSLOTS_CHANGED"); env.__settle(2)
+  local g = R.db.guilds["Lions-TestRealm"]
+  assert(g and g.name == "Lions" and g.money == 5000 and g.numTabs == 2, "record")
+  assert(g.containers[1001].name == "Mats" and g.containers[1001].slots[1].c == 20, "tab 1 scanned")
+  assert(g.containers[1002].slots[1].i == 700, "tab 2 scanned")
+  local Guild = R.GuildUI
+  assert(Guild.bagFilter == 1001, "opens on the vault's current tab")
+  R.settings.rememberCategory = false
+  Guild:Close(); env.__gb.closed = 0
+  env.__ev("GUILDBANKFRAME_CLOSED"); env.__settle(2)
+  env.__gb.current = 2
+  env.__ev("GUILDBANKFRAME_OPENED"); env.__settle(2)
+  env.__ev("GUILDBANKBAGSLOTS_CHANGED"); env.__settle(2)
+  env.__ev("GUILDBANKBAGSLOTS_CHANGED"); env.__settle(2)
+  assert(Guild.frame:IsShown() and Guild.bagFilter == 1002, "current tab kept with rememberCategory off")
+  R.settings.rememberCategory = true
+  env.__gb.current = 1
+  Guild:SetGuildTab(nil); env.__settle(4)
+  assert(#Guild.entries == 2, "all tabs, ore combined: " .. #Guild.entries)
+  -- tab selector
+  Guild:SetGuildTab(2); env.__settle(4)
+  assert(env.__gb.current == 2 and #Guild.entries == 1 and Guild.tabGuild.text:GetText() == "Officer", "tab 2 selected")
+  -- tooltip lists the guild bank count
+  local tt = env.GameTooltip
+  tt.__lines = nil; tt.rummageID = nil
+  R.Tooltip:Add(tt, "|cffffffff|Hitem:700::::::::60:::::|h[Copper Ore]|h|r")
+  local found = false
+  for _, l in ipairs(tt.__lines or {}) do if l:find("Lions", 1, true) and l:find("25", 1, true) then found = true end end
+  assert(found, "guild count in tooltip")
+  R.settings.tooltipGuildCounts = false; R:Fire("DATA_CHANGED")
+  tt.__lines = nil; tt.rummageID = nil
+  R.Tooltip:Add(tt, "|cffffffff|Hitem:700::::::::60:::::|h[Copper Ore]|h|r")
+  assert(not tt.__lines, "setting off")
+  -- sanitizer keeps valid records and drops garbage
+  local _, R2 = boot(function(e)
+    e.RummageDB = { version = 4, settings = {}, chars = {}, guilds = {
+      ["Ok-R"] = { name = "Ok", containers = { [1001] = { size = 98, slots = { [1] = { l = "x", c = 1 }, [500] = { l = "y", c = 1 }, [2] = "bad" } }, [5] = { slots = {} } } },
+      ["Bad-R"] = { containers = {} }, [7] = { name = "n" } } }
+  end)
+  local ok = R2.db.guilds["Ok-R"]
+  assert(ok and not R2.db.guilds["Bad-R"] and not R2.db.guilds[7], "garbage records dropped")
+  assert(ok.containers[1001].slots[1] and not ok.containers[1001].slots[500] and not ok.containers[1001].slots[2] and not ok.containers[5])
+  assert(not env.__errors, "errors: " .. tostring(env.__errors and env.__errors[1]))
+end)
+
+test("guild bank: dropping a cursor item from Bags deposits into a free slot of the tab", function()
+  local env, R = boot(guildEnv)
+  openVault(env)
+  local Guild = R.GuildUI
+  env.__gb.cursor = true
+  Guild:SetGuildTab(1); env.__settle(2)
+  Guild.list.scripts.OnReceiveDrag(Guild.list)
+  assert(env.__gb.picked and env.__gb.picked[1] == 1 and env.__gb.picked[2] == 3, "first free slot of tab 1")
+  -- the tab icons in the footer accept drops too
+  env.__gb.picked = nil
+  Guild:UpdateFooter()
+  local btn = Guild.bagButtons[1]
+  assert(btn and btn.bag == 1001)
+  btn.scripts.OnReceiveDrag(btn)
+  assert(env.__gb.picked and env.__gb.picked[2] == 3, "deposit via tab icon")
+  -- no deposit rights on tab 2
+  env.__gb.picked = nil
+  Guild:SetGuildTab(2); env.__settle(2)
+  Guild:DropCursorItem()
+  assert(not env.__gb.picked and chatHas(env, "can't deposit"), "deposit refused")
+  -- a full tab is reported
+  Guild:SetGuildTab(1)
+  for s = 1, 98 do if not env.__gb.items[1][s] then env.__gb.add(1, s, 800 + s) end end
+  Guild:DropCursorItem()
+  assert(not env.__gb.picked and chatHas(env, "full"), "full tab")
+  assert(not env.__errors, "errors: " .. tostring(env.__errors and env.__errors[1]))
+end)
+
+test("guild bank: right-click and drag withdraw to the bags within the limits", function()
+  local env, R = boot(guildEnv)
+  openVault(env)
+  local Guild = R.GuildUI
+  Guild:SetGuildTab(1); env.__settle(4)
+  local banner
+  for _, e in ipairs(Guild.entries) do if e.id == 701 then banner = e end end
+  assert(banner and banner.bag == 1001 and banner.slot == 2)
+  Guild:GuildClick(banner, "RightButton")
+  assert(env.__gb.stored and env.__gb.stored[1] == 1 and env.__gb.stored[2] == 2, "auto-stored into bags")
+  assert(R.GuildBank:Limits(1).remaining == 1, "local withdrawal count")
+  -- drag picks the item up (drop it on Bags to finish)
+  Guild:GuildDrag(banner)
+  assert(env.__gb.picked and env.__gb.picked[2] == 2, "drag picks up")
+  -- setting: right-click picks up / does nothing
+  env.__gb.stored, env.__gb.picked = nil, nil
+  R.settings.guildRightClick = "cursor"
+  Guild:GuildClick(banner, "RightButton")
+  assert(env.__gb.picked and not env.__gb.stored)
+  R.settings.guildRightClick = "none"; env.__gb.picked = nil
+  Guild:GuildClick(banner, "RightButton")
+  assert(not env.__gb.picked and not env.__gb.stored)
+  R.settings.guildRightClick = "bags"
+  -- no withdrawals left
+  R.GuildBank:Limits(1).remaining = 0
+  Guild:GuildClick(banner, "RightButton")
+  assert(not env.__gb.stored and chatHas(env, "No withdrawals left"), "limit enforced")
+  -- footer shows the limit
+  R.GuildBank:Limits(1).remaining = 3
+  Guild:UpdateFooter()
+  assert(Guild.cachedText:GetText():find("3 withdrawals left", 1, true), Guild.cachedText:GetText())
+  -- full bags
+  R.GuildBank:Limits(1).remaining = 5
+  for s = 1, 8 do env.__addItem(0, s, 900 + s, 1) end
+  R.Data:ScanInventory()
+  Guild:GuildClick(banner, "RightButton")
+  assert(not env.__gb.stored and chatHas(env, "bags are full"), "full bags")
+  assert(not env.__errors, "errors: " .. tostring(env.__errors and env.__errors[1]))
+end)
+
+test("guild bank: away from the vault the cached view is view-only", function()
+  local env, R = boot(guildEnv)
+  openVault(env)
+  env.__ev("GUILDBANKFRAME_CLOSED"); env.__settle(2)
+  local Guild = R.GuildUI
+  env.SlashCmdList.RUMMAGE("guild"); env.__settle(4)
+  assert(Guild.frame:IsShown() and not Guild:GuildLive(), "opened from cache")
+  Guild:SetGuildTab(nil); env.__settle(4)
+  assert(#Guild.entries == 2, "cached items listed")
+  env.__gb.cursor = true
+  Guild:GuildClick(Guild.entries[1], "RightButton")
+  Guild:GuildDrag(Guild.entries[1])
+  Guild:DropCursorItem()
+  assert(not env.__gb.stored and not env.__gb.picked, "no item actions while away")
+  Guild:UpdateFooter()
+  assert(Guild.cachedText:GetText():find("Cached guild bank", 1, true), Guild.cachedText:GetText())
+  assert(not Guild.btnTransfer:IsShown() and not Guild.btnRestack:IsShown(), "no footer actions")
+  -- a character outside any guild still sees the cache, and the guild menu lists it
+  env.GetGuildInfo = function() return nil end
+  R:RequestRefresh(); env.__settle(4)
+  Guild:ShowGuildMenu(Guild.charBtn)
+  Guild.guildKey = "Lions-TestRealm"; R:RequestRefresh(); env.__settle(4)
+  assert(#Guild.entries == 2 and Guild:Char().name == "Lions", "cached guild selectable")
+  assert(not env.__errors, "errors: " .. tostring(env.__errors and env.__errors[1]))
+end)
+
+-- Cached bank (this character) and cached guild banks (own guild and an alt's guild).
+local function cachedEnv(e)
+  guildEnv(e)
+  e.__items[710] = { name = "Bank Gem", quality = 2 }
+  e.__items[720] = { name = "Wolf Pelt", quality = 1 }
+  local function link(id, n) return "|cffffffff|Hitem:" .. id .. "::::::::60:::::|h[" .. n .. "]|h|r" end
+  e.RummageDB = { version = 4, settings = {}, chars = {
+      ["Tester-TestRealm"] = { name = "Tester", realm = "TestRealm", containers = {
+        [-1] = { size = 4, slots = { [1] = { l = link(700, "Copper Ore"), c = 3, i = 700 }, [2] = { l = link(710, "Bank Gem"), c = 1, i = 710 } } } } },
+      ["Alt-TestRealm"] = { name = "Alt", realm = "TestRealm", guildKey = "Wolves-TestRealm", containers = {} } },
+    guilds = {
+      ["Lions-TestRealm"] = { name = "Lions", realm = "TestRealm", lastSeen = 900, numTabs = 1, containers = {
+        [1001] = { name = "Mats", size = 98, slots = { [1] = { l = link(700, "Copper Ore"), c = 20, i = 700 } } } } },
+      ["Wolves-TestRealm"] = { name = "Wolves", realm = "TestRealm", numTabs = 1, containers = {
+        [1001] = { name = "Pelts", size = 98, slots = { [4] = { l = link(720, "Wolf Pelt"), c = 7, i = 720 } } } } } } }
+end
+
+test("away from the bank: Bags header buttons open the cached Bank and Guild Bank, view-only", function()
+  local env, R = boot(cachedEnv)
+  local Bags, Bank, Guild = R.UI, R.BankUI, R.GuildUI
+  open(env, R)
+  assert(Bags.tabBank:IsShown() and Bags.tabGuildToggle:IsShown(), "header buttons in Bags")
+  Bags.tabBank:Click(); env.__settle(4)
+  assert(Bank.frame:IsShown() and Bags.frame:IsShown() and Bags.tabBank.active, "Bank opened beside Bags")
+  assert(Bank.frame:GetRight() <= Bags.frame:GetLeft(), "Bank left of Bags")
+  assert(#Bank.entries == 2 and not Bank:Interactive(), "cached, non-interactive bank")
+  assert(Bank.cachedText:GetText() == R.L.cachedBank, Bank.cachedText:GetText())
+  Bags.tabGuildToggle:Click(); env.__settle(4)
+  assert(Guild.frame:IsShown() and Bags.tabGuildToggle.active, "Guild Bank opened")
+  assert(#Guild.entries == 1 and Guild:Char().name == "Lions" and not Guild:GuildLive(), "cached, non-interactive guild bank")
+  assert(Guild.cachedText:GetText():find("Cached guild bank", 1, true), Guild.cachedText:GetText())
+  -- drops and clicks do nothing but explain; no live API is touched
+  env.__gb.cursor = true
+  env.__picked = nil
+  Bank.list.scripts.OnReceiveDrag(Bank.list)
+  Guild.list.scripts.OnReceiveDrag(Guild.list)
+  Guild:GuildClick(Guild.entries[1], "RightButton")
+  Guild:SetGuildTab(1); env.__settle(4)
+  assert(not env.__picked and not env.__gb.picked and not env.__gb.stored, "no moves")
+  assert(#env.__gb.queried == 0 and env.__gb.current == 1, "no QueryGuildBankTab / SetCurrentGuildBankTab away")
+  assert(chatHas(env, "visit a banker") and chatHas(env, "open the guild vault"), "drop hints")
+  -- the alt's guild follows the character chosen in Bags
+  Bags.charKey = "Alt-TestRealm"; R:RequestRefresh(); env.__settle(4)
+  assert(Guild:Char().name == "Wolves" and #Guild.entries == 1 and Guild.entries[1].id == 720, "alt's guild cache")
+  Bags.charKey = nil; R:RequestRefresh(); env.__settle(4)
+  -- toggling again closes them
+  Bags.tabGuildToggle:Click(); Bags.tabBank:Click(); env.__settle(2)
+  assert(not Guild.frame:IsShown() and not Bank.frame:IsShown() and not Bags.tabBank.active and not Bags.tabGuildToggle.active)
+  assert(env.__gb.closed == 0, "closing cached windows never calls CloseGuildBankFrame")
+  assert(not env.__errors, "errors: " .. tostring(env.__errors and env.__errors[1]))
+end)
+
+test("away from the bank: no cache shows the empty state; /rum guild and /rum bank open anywhere", function()
+  local env, R = boot()
+  env.SlashCmdList.RUMMAGE("guild"); env.__settle(4)
+  local Guild, Bank = R.GuildUI, R.BankUI
+  assert(Guild.frame:IsShown() and #Guild.entries == 0, "guild window opens without a cache")
+  assert(Guild.emptyText:GetText() == R.L.emptyGuild and Guild:Char().name == R.L.noGuild, Guild.emptyText:GetText())
+  env.SlashCmdList.RUMMAGE("bank"); env.__settle(4)
+  assert(Bank.frame:IsShown() and Bank.emptyText:GetText() == R.L.emptyBank, Bank.emptyText:GetText())
+  -- an alt without a known guild shows the empty state too
+  local env2, R2 = boot(cachedEnv)
+  R2.UI.charKey = "Alt-TestRealm"
+  R2.db.chars["Alt-TestRealm"].guildKey = nil
+  R2.GuildUI:Open(); env2.__settle(4)
+  assert(#R2.GuildUI.entries == 0 and R2.GuildUI.emptyText:GetText() == R2.L.emptyGuild)
+  assert(R.L.slashUsage:find("guild", 1, true), "/rum guild documented")
+  assert(not env.__errors and not env2.__errors, "errors")
+end)
+
+test("key bindings toggle the right window (Bindings.xml)", function()
+  local env, R = boot()
+  local f = io.open("Rummage/Bindings.xml", "r") or io.open("../Rummage/Bindings.xml", "r")
+  assert(f, "Bindings.xml not found")
+  local xml = f:read("*a"); f:close()
+  local bodies = {}
+  for name, body in xml:gmatch('<Binding name="([%w_]+)"[^>]*>(.-)</Binding>') do bodies[name] = body end
+  local function run(name)
+    local chunk = assert(loadstring(bodies[name], name))
+    setfenv(chunk, env)
+    chunk()
+    env.__settle(2)
+  end
+  local Bags, Bank, Guild = R.UI, R.BankUI, R.GuildUI
+  run("RUMMAGE_TOGGLE_BANK")
+  assert(Bank.frame:IsShown() and not Bags.frame:IsShown(), "Toggle bank opens the Bank window, not Bags")
+  run("RUMMAGE_TOGGLE_BANK")
+  assert(not Bank.frame:IsShown(), "and closes it again")
+  run("RUMMAGE_TOGGLE_GUILD")
+  assert(Guild.frame:IsShown() and not Bags.frame:IsShown(), "Toggle guild bank")
+  run("RUMMAGE_TOGGLE")
+  assert(Bags.frame:IsShown(), "Toggle bags")
+  for name in pairs(bodies) do
+    assert(env["BINDING_NAME_" .. name], "label for " .. name)
   end
   assert(not env.__errors, "errors: " .. tostring(env.__errors and env.__errors[1]))
 end)

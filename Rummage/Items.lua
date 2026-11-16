@@ -63,6 +63,8 @@ function Items:Info(link)
 		bindType = bindType,
 	}
 	inf.slotName = (inf.equipLoc ~= "" and _G[inf.equipLoc]) or ""
+	-- lower-cased once here so text searches don't lower() per item per refresh
+	inf.ltype, inf.lsub, inf.lslot = inf.type:lower(), inf.sub:lower(), inf.slotName:lower()
 	inf.equippable = inf.equipLoc ~= "" and inf.equipLoc ~= "INVTYPE_BAG" and inf.equipLoc ~= "INVTYPE_QUIVER"
 		and inf.equipLoc ~= "INVTYPE_NON_EQUIP" and inf.equipLoc ~= "INVTYPE_NON_EQUIP_IGNORE"
 	if infoCount >= INFO_CACHE_MAX then wipe(infoCache); infoCount = 0 end
@@ -116,7 +118,7 @@ local function ReleaseAll()
 		local sl = e.slots
 		for j = 1, #sl do pairPool[#pairPool + 1] = sl[j]; sl[j] = nil end
 		wipe(e.vals)
-		e.info, e.fav, e.new, e.acquired, e.junk = nil, nil, nil, nil, nil
+		e.info, e.fav, e.new, e.acquired, e.junk, e.live = nil, nil, nil, nil, nil, nil
 		entryPool[#entryPool + 1] = e
 		live[i] = nil
 	end
@@ -130,12 +132,12 @@ local function AcquireEntry()
 	return e
 end
 
--- Builds entries for a character record and a view ("bags" or "bank").
+-- Builds entries for a character (or guild) record and a view ("bags", "bank" or "guild").
 -- The returned array and its entries are only valid until the next Build call.
 function Items:Build(char, view)
 	ReleaseAll()
 	wipe(out)
-	local bags = (view == "bank") and API.BankBagList or API.InvBagList
+	local bags = (view == "guild" and API.GuildBagList) or ((view == "bank") and API.BankBagList) or API.InvBagList
 	local combine = R.settings.combineStacks
 	if combine then wipe(combineMap) end
 	for _, bag in ipairs(bags) do
@@ -176,6 +178,9 @@ function Items:Prepare(e, char, isMe, isLive)
 	e.fav = R.db.favorites[e.id]
 	e.new = isMe and R.Data.newItems[e.id] or nil
 	e.acquired = char.acquired and char.acquired[e.id]
+	-- live = bag/slot are real locations in the player's current bags (integrations
+	-- that inspect a slot, like Can I Mog It? and Scrap, must not get cached ones)
+	e.live = isLive ~= false or nil
 	e.junk = R.Junk:IsJunk(e, isLive)
 end
 
@@ -185,6 +190,69 @@ function Items:BindText(e)
 	if bt == 2 then return "|cff7fd17fBoE|r" end
 	return BIND_TEXT[bt] or ""
 end
+
+---------------------------------------------------------------------------
+-- Equipment sets (1.9.0). itemID -> "set a, set b" (lower-case), rebuilt lazily
+-- after EQUIPMENT_SETS_CHANGED. Mainline C_EquipmentSet first, then the classic
+-- GetEquipmentSetInfo / GetEquipmentSetItemIDs pair; nothing when neither exists.
+---------------------------------------------------------------------------
+local setByID, setNames, setsDirty = {}, {}, true
+
+local function AddSetItems(name, ids)
+	if type(name) ~= "string" or type(ids) ~= "table" then return end
+	setNames[#setNames + 1] = name
+	local lname = name:lower()
+	for _, id in pairs(ids) do
+		if type(id) == "number" and id > 0 then
+			local cur = setByID[id]
+			if not cur then setByID[id] = lname
+			elseif not (", " .. cur .. ","):find(", " .. lname .. ",", 1, true) then setByID[id] = cur .. ", " .. lname end
+		end
+	end
+end
+
+function Items:RebuildSets()
+	wipe(setByID); wipe(setNames)
+	setsDirty = false
+	local C = _G.C_EquipmentSet
+	if C and C.GetEquipmentSetIDs and C.GetEquipmentSetInfo and C.GetItemIDs then
+		local ok, ids = pcall(C.GetEquipmentSetIDs)
+		if ok and type(ids) == "table" then
+			for _, setID in ipairs(ids) do
+				local okN, name = pcall(C.GetEquipmentSetInfo, setID)
+				local okI, items = pcall(C.GetItemIDs, setID)
+				if okN and okI then AddSetItems(name, items) end
+			end
+		end
+	elseif _G.GetNumEquipmentSets and _G.GetEquipmentSetInfo and _G.GetEquipmentSetItemIDs then
+		local okC, n = pcall(_G.GetNumEquipmentSets)
+		for i = 1, (okC and tonumber(n)) or 0 do
+			local okN, name = pcall(_G.GetEquipmentSetInfo, i)
+			if okN and name then
+				local okI, items = pcall(_G.GetEquipmentSetItemIDs, name)
+				if okI then AddSetItems(name, items) end
+			end
+		end
+	end
+end
+
+-- Lower-case, comma-separated names of the sets that use this item, or nil.
+function Items:SetNames(e)
+	if setsDirty then self:RebuildSets() end
+	return e and e.id and setByID[e.id] or nil
+end
+
+function Items:InSet(e) return self:SetNames(e) ~= nil end
+
+function Items:SetList()
+	if setsDirty then self:RebuildSets() end
+	return setNames
+end
+
+R:RegisterEvent("EQUIPMENT_SETS_CHANGED", function()
+	setsDirty = true
+	R:RequestRefresh()
+end)
 
 function Items:IsKey(e)
 	return (API.KEYRING and e.bag == API.KEYRING) or (e.info and e.info.class == 13)
