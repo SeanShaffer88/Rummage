@@ -64,8 +64,40 @@ local function CustomObject(def, i)
 	return o
 end
 
+-- Plugin categories (1.9.0): Rummage:RegisterCategory(id, name, icon, filter)
+-- adds a sidebar entry after the built-ins. ids are namespaced "plugin:<id>".
+local plugins, pluginById = {}, {}
+Categories.plugins = plugins
+
+function Categories:RegisterPlugin(id, name, icon, filter)
+	if type(id) ~= "string" or id == "" or type(name) ~= "string" or type(filter) ~= "function" then return nil end
+	local key = "plugin:" .. id
+	local o = pluginById[key]
+	if not o then
+		o = { id = key, plugin = true }
+		pluginById[key] = o
+		plugins[#plugins + 1] = o
+	end
+	o.name, o.icon = name, icon or DEFAULT_CUSTOM_ICON
+	o.filter = function(e)
+		local ok, res = pcall(filter, e)
+		return ok and res and true or false
+	end
+	R:RequestRefresh()
+	return key
+end
+
+function Categories:UnregisterPlugin(id)
+	local key = "plugin:" .. tostring(id)
+	if not pluginById[key] then return end
+	pluginById[key] = nil
+	for i = #plugins, 1, -1 do if plugins[i].id == key then table.remove(plugins, i) end end
+	R:RequestRefresh()
+end
+
 function Categories:Get(id)
 	if byId[id] then return byId[id] end
+	if pluginById[id] then return pluginById[id] end
 	local idx = type(id) == "string" and tonumber(id:match("^custom(%d+)$"))
 	local def = idx and R.db.categories[idx]
 	if def then return CustomObject(def, idx) end
@@ -76,6 +108,7 @@ function Categories:List()
 	local list = wipe(listCache)
 	local builtin = self.builtin
 	for i = 1, #builtin do list[i] = builtin[i] end
+	for i = 1, #plugins do list[#list + 1] = plugins[i] end
 	local defs = R.db.categories
 	for i = 1, #defs do list[#list + 1] = CustomObject(defs[i], i) end
 	return list

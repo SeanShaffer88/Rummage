@@ -82,6 +82,21 @@ end
 local bankSet = {}
 for i, b in ipairs(API.BankBagList) do bankSet[b] = i end
 
+-- Guild bank tabs (Guild Bank window): pseudo container IDs GUILD_BASE + tab, never real bags.
+API.GUILD_BASE = 1000
+API.MAX_GUILD_TABS = _G.MAX_GUILDBANK_TABS or 8
+API.GUILD_SLOTS = _G.MAX_GUILDBANK_SLOTS_PER_TAB or 98
+API.GuildBagList = {}
+for t = 1, API.MAX_GUILD_TABS do API.GuildBagList[t] = API.GUILD_BASE + t end
+
+function API.IsGuildBag(bag)
+	return type(bag) == "number" and bag > API.GUILD_BASE and bag <= API.GUILD_BASE + API.MAX_GUILD_TABS
+end
+
+function API.GuildTabOf(bag)
+	if API.IsGuildBag(bag) then return bag - API.GUILD_BASE end
+end
+
 function API.IsBankBag(bag)
 	return bankSet[bag] ~= nil
 end
@@ -113,6 +128,7 @@ function API.GetBagItem(bag)
 end
 
 function API.BagLabel(bag)
+	if API.IsGuildBag(bag) then return "Guild Tab " .. API.GuildTabOf(bag) end
 	if bag == API.BACKPACK then return "Backpack" end
 	if bag == API.BANK then return "Bank" end
 	if API.KEYRING and bag == API.KEYRING then return "Keyring" end
@@ -123,6 +139,7 @@ function API.BagLabel(bag)
 end
 
 function API.BagShort(bag)
+	if API.IsGuildBag(bag) then return "G" .. API.GuildTabOf(bag) end
 	if bag == API.BACKPACK then return "B0" end
 	if bag == API.BANK then return "Bank" end
 	if API.KEYRING and bag == API.KEYRING then return "Key" end

@@ -1,4 +1,4 @@
--- Rummage: builds the two list windows (Bags and Bank) from the UI parts.
+-- Rummage: builds the list windows (Bags, Bank, Guild Bank) from the UI parts.
 -- Added in 1.8.0 so the bank is its own window and items can be dragged between them.
 -- Copyright (C) 2026 Malikor. GPLv3 or later.
 
@@ -16,6 +16,7 @@ end
 
 R.UI = Make("bags")
 R.BankUI = Make("bank")
+R.GuildUI = Make("guild")   -- 1.9.0: guild bank in its own window
 
 -- Calls fn(window) for every created window.
 function R:EachUI(fn)

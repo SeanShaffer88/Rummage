@@ -28,6 +28,22 @@ local CHECKS = {
 	{ "GetNumBuybackItems / BuybackItem", false, function() return _G.GetNumBuybackItems and _G.BuybackItem end },
 	{ "GetSpecialization", false, function() return _G.GetSpecialization or (C_SpecializationInfo and C_SpecializationInfo.GetSpecialization) end },
 	{ "C_AddOns.GetAddOnMetadata", false, function() return C_AddOns and C_AddOns.GetAddOnMetadata end },
+	-- 1.9.0
+	{ "C_EquipmentSet / GetEquipmentSetItemIDs", false, function() return (C_EquipmentSet and C_EquipmentSet.GetItemIDs) or _G.GetEquipmentSetItemIDs end },
+	{ "GetBackpackCurrencyInfo", false, function() return (C_CurrencyInfo and C_CurrencyInfo.GetBackpackCurrencyInfo) or _G.GetBackpackCurrencyInfo end },
+	{ "ClickSendMailItemButton", false, function() return _G.ClickSendMailItemButton end },
+	{ "ClickTradeButton", false, function() return _G.ClickTradeButton end },
+	{ "GetGuildBankWithdrawMoney", false, function() return _G.GetGuildBankWithdrawMoney end },
+	-- 1.9.0 guild bank window (any missing one leaves it view-only or cache-only)
+	{ "GetGuildInfo", false, function() return _G.GetGuildInfo end },
+	{ "GetNumGuildBankTabs / GetGuildBankTabInfo", false, function() return _G.GetNumGuildBankTabs and _G.GetGuildBankTabInfo end },
+	{ "GetGuildBankItemLink / GetGuildBankItemInfo", false, function() return _G.GetGuildBankItemLink and _G.GetGuildBankItemInfo end },
+	{ "QueryGuildBankTab", false, function() return _G.QueryGuildBankTab end },
+	{ "Get/SetCurrentGuildBankTab", false, function() return _G.GetCurrentGuildBankTab and _G.SetCurrentGuildBankTab end },
+	{ "PickupGuildBankItem", false, function() return _G.PickupGuildBankItem end },
+	{ "AutoStoreGuildBankItem", false, function() return _G.AutoStoreGuildBankItem end },
+	{ "GetGuildBankMoney", false, function() return _G.GetGuildBankMoney end },
+	{ "CloseGuildBankFrame", false, function() return _G.CloseGuildBankFrame end },
 }
 
 -- Returns the result list and the count of missing REQUIRED entries.

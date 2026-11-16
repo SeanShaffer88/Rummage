@@ -13,6 +13,9 @@ pending-layout badge; per-view layouts; SavedVariables sanitizing and v3→v4 mi
 settings export/import and profile round-trips; junk sale safeguards, log and buyback;
 stale data; saved searches; keyboard navigation (including search focus and combat);
 `/rum apicheck`, inventory CSV, auto-profile, tooltip secret-value guard, upgrade stat diff,
+Guild Bank window (opens beside Bags, own geometry, tab queries and cache, deposit, withdraw
+within limits, view-only away from the vault, sanitizing, tooltip counts); cached Bank and Guild Bank
+opened away from the bank from the Bags header buttons (view-only, empty states, alt's guild),
 and every slash command running without a Lua error.
 
 What is **not** covered: real client behaviour. The stub fakes geometry for UIParent-anchored

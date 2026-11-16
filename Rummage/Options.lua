@@ -96,6 +96,8 @@ builders.general = function(p)
 	st:Header("Window")
 	st:Check("Replace Blizzard bags", "replaceBags", "Requires /reload to take full effect.", function() O:NeedReload() end)
 	st:Check("Replace Blizzard bank", "replaceBank", "Requires /reload to take full effect.", function() O:NeedReload() end)
+	st:Check("Replace Blizzard guild bank", "replaceGuildBank",
+		"The guild vault opens in Rummage's Guild Bank window. Requires /reload to take full effect.", function() O:NeedReload() end)
 	st:Check("Lock window position", "locked", "Prevents moving and resizing.")
 	st:Check("Clear search when opened", "resetSearchOnOpen")
 	st:Check("Remember last selected category", "rememberCategory",
@@ -123,7 +125,27 @@ builders.general = function(p)
 	st:Check("Auction House", "auction", nil, nil, ao)
 	st:Check("Trade window", "trade", nil, nil, ao)
 	st:Check("Banker (opens Bank window)", "bank", nil, nil, ao)
+	st:Check("Guild vault (opens Guild Bank window)", "guild", nil, nil, ao)
 	st:Check("Other Blizzard \"open bags\" calls", "other", nil, nil, ao)
+
+	st:Header("Guild bank")
+	st:Check("Also open Bags beside the guild bank", "guildOpenBags",
+		"Opening the guild vault opens the Bags window too (if it was closed), so items can be dragged across. Bags closes again when you leave.")
+	local TABMODES = { current = "Open on: the vault's current tab", all = "Open on: all tabs" }
+	st:CycleButton(function() return TABMODES[S().guildDefaultTab] or TABMODES.current end, function()
+		S().guildDefaultTab = (S().guildDefaultTab == "all") and "current" or "all"
+	end, "Which tab the Guild Bank window lists when the vault opens")
+	local RC = { "bags", "cursor", "none" }
+	local RCLABEL = { bags = "Right-click: withdraw to bags", cursor = "Right-click: pick up", none = "Right-click: nothing" }
+	st:CycleButton(function() return RCLABEL[S().guildRightClick] or RCLABEL.bags end, function(dir)
+		local i = 1
+		for k, v in ipairs(RC) do if v == S().guildRightClick then i = k end end
+		S().guildRightClick = RC[(i - 1 + dir) % #RC + 1]
+	end, "What right-clicking a guild bank item does (withdrawal limits always apply)")
+	st:Check("Footer shows withdrawals left", "guildFooterLimits", nil, function() R:RequestRefresh() end)
+	st:Check("Tooltips: counts in guild banks", "tooltipGuildCounts", nil, function() R:Fire("DATA_CHANGED") end)
+	local resetG = W:Button(p, "Reset Guild Bank window position", COL2 - 30, 20, function() R.GuildUI:ResetPosition() end)
+	st:Place(resetG, 20, 6)
 
 	st:Header("Safety")
 	st:Check("Warn about conflicting bag addons", "warnConflicts")
@@ -136,6 +158,10 @@ builders.general = function(p)
 		"Needs Auctionator. Shows whether a stack is worth more at the vendor or on the auction house.")
 	st:Check("Search all characters while searching", "searchAllChars",
 		"While the search box has text, results come from every character's cached bags (the 'All' button in the window header does the same). Results are view-only in this mode.")
+	st:Check("Show tracked currencies in the footer", "showCurrencies",
+		"Shows up to three currencies you marked \"Show on backpack\" in the currency window.", function() R:RequestRefresh() end)
+	st:Check("Transfer to an open mail or trade window", "transferTargets",
+		"With the Send Mail tab or a trade open, the Transfer button adds the listed items to it. Bound items are skipped.", function() R:RequestRefresh() end)
 
 	st:Header("Profiles")
 	local profName = W:EditBox(p, COL2 - 30, 20)
@@ -445,7 +471,7 @@ builders.about = function(p)
 	st:Header("Keybinds")
 	st:Note("Routed to Rummage: " .. (R.Hooks:BoundKeys() or "none"))
 	st:Header("Slash commands")
-	st:Note("/rum  toggle bags\n/rum bank  toggle bank\n/rum search <text>\n/rum config\n/rum restack\n/rum sell\n/rum buyback [n|all]\n/rum junklog\n/rum gold  ·  /rum mail  ·  /rum perf\n/rum inventory  ·  /rum apicheck [export]\n/rum conflicts\n/rum reset  (window position)\n/rum export · /rum import <string>")
+	st:Note("/rum  toggle bags\n/rum bank  toggle bank\n/rum guild  toggle guild bank\n/rum search <text>\n/rum config\n/rum restack\n/rum sell\n/rum buyback [n|all]\n/rum junklog\n/rum gold  ·  /rum mail  ·  /rum perf\n/rum inventory  ·  /rum apicheck [export]\n/rum conflicts\n/rum reset  (window position)\n/rum export · /rum import <string>")
 	st:Header("Settings sharing")
 	local expB = W:Button(p, "Export settings...", COL2 - 30, 20, function() StaticPopup_Show("RUMMAGE_EXPORT_SETTINGS") end)
 	st:Place(expB, 20, 4)

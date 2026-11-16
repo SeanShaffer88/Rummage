@@ -89,6 +89,58 @@ function Data:Init()
 	R:RegisterEvent("ITEM_LOCK_CHANGED", function() R:Fire("LOCKS_CHANGED") end)
 	R:RegisterEvent("BAG_UPDATE_COOLDOWN", function() R:Fire("COOLDOWNS_CHANGED") end)
 	R:RegisterEvent("PLAYER_LOGOUT", function() Data.me.lastSeen = time() end)
+	R:RegisterEvent("CURRENCY_DISPLAY_UPDATE", function() Data:ScanCurrencies() end)
+	self:ScanCurrencies()
+end
+
+---------------------------------------------------------------------------
+-- Tracked currencies (1.9.0): the ones the player marked "Show on backpack".
+-- Mainline C_CurrencyInfo.GetBackpackCurrencyInfo(i) -> table; classic global
+-- GetBackpackCurrencyInfo(i) -> name, count, icon, id. Stored per character so
+-- alts' footers and the gold tooltip can show them.
+---------------------------------------------------------------------------
+local MAX_TRACKED = 3
+
+local function BackpackCurrency(i)
+	local C = _G.C_CurrencyInfo
+	if C and C.GetBackpackCurrencyInfo then
+		local ok, t = pcall(C.GetBackpackCurrencyInfo, i)
+		if ok and type(t) == "table" and t.name then
+			return t.name, t.quantity, t.iconFileID, t.currencyTypesID
+		end
+		return nil
+	end
+	if _G.GetBackpackCurrencyInfo then
+		local ok, name, count, icon, id = pcall(_G.GetBackpackCurrencyInfo, i)
+		if ok and name then return name, count, icon, id end
+	end
+end
+
+function Data:ScanCurrencies()
+	local me = self.me
+	if not me then return end
+	local list = {}
+	for i = 1, MAX_TRACKED do
+		local name, qty, icon, id = BackpackCurrency(i)
+		if not name then break end
+		if R.IsSecret(qty) then qty = nil end
+		list[#list + 1] = { n = name, q = tonumber(qty) or 0, t = icon, i = id }
+	end
+	me.currencies = list
+	R:Fire("MONEY_CHANGED")
+end
+
+-- "|T..|t 12  |T..|t 340" for a character record, or "".
+function Data:CurrencyText(c)
+	local list = c and c.currencies
+	if type(list) ~= "table" or #list == 0 then return "" end
+	local parts = {}
+	for i = 1, #list do
+		local cur = list[i]
+		local icon = cur.t and ("|T" .. cur.t .. ":0|t ") or ""
+		parts[#parts + 1] = icon .. (BreakUpLargeNumbers and BreakUpLargeNumbers(cur.q or 0) or tostring(cur.q or 0))
+	end
+	return table.concat(parts, "  ")
 end
 
 ---------------------------------------------------------------------------

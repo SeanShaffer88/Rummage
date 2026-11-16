@@ -1,4 +1,4 @@
--- Rummage: item counts on other characters in item tooltips (Syndicator-style).
+-- Rummage: item counts on other characters (and cached guild banks) in item tooltips.
 -- Copyright (C) 2026 Malikor. GPLv3 or later.
 
 local _, ns = ...
@@ -46,8 +46,21 @@ local function BuildLines(id)
 			end
 		end
 	end
-	if shown == 0 then return NONE end
 	if shown > 1 then lines[#lines + 1] = { "|cffd9a441Total|r", "|cffffffff" .. total .. "|r" } end
+	-- 1.9.0: cached guild banks (listed after the characters, not part of their total)
+	if R.settings.tooltipGuildCounts and R.GuildBank then
+		for _, entry in ipairs(R.GuildBank:SortedGuilds()) do
+			local g = entry.g
+			if not R.settings.tooltipRealmOnly or g.realm == nil or g.realm == myRealm then
+				local n = R.GuildBank:CountFor(g, id)
+				if n > 0 then
+					shown = shown + 1
+					lines[#lines + 1] = { "|cff40c040" .. (g.name or entry.key) .. "|r: |cffffffff" .. n .. "|r", "Guild bank" }
+				end
+			end
+		end
+	end
+	if shown == 0 then return NONE end
 	return lines
 end
 

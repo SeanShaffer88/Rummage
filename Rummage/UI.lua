@@ -11,7 +11,8 @@ local tsort = table.sort
 local InCombatLockdown = InCombatLockdown
 
 -- 1.8.0: the window is a factory run once per window (Bags, Bank), so each gets its own
--- state, frames and closures. UI_Boot.lua builds the instances; UI.kind is "bags" or "bank".
+-- state, frames and closures. UI_Boot.lua builds the instances; UI.kind is "bags", "bank"
+-- or "guild" (1.9.0: guild bank, whose items use plain rows instead of secure buttons).
 R.UIParts = R.UIParts or {}
 R.UIParts[#R.UIParts + 1] = function(UI)
 
@@ -36,6 +37,7 @@ local UPGRADE_ICON = "Interface\\AddOns\\Pawn\\Textures\\UpgradeArrow"
 local SORT_ARROW = "Interface\\Buttons\\UI-SortArrow"
 
 UI.view = UI.kind
+UI.suffix = (UI.kind == "bank" and "Bank") or (UI.kind == "guild" and "Guild") or ""
 UI.category = "all"
 UI.search = ""
 UI.offset = 0
@@ -52,7 +54,21 @@ UI.bagButtons = {}
 ---------------------------------------------------------------------------
 -- State helpers
 ---------------------------------------------------------------------------
+local NO_GUILD = { containers = {}, money = 0, numTabs = 0 }
+
 function UI:Char()
+	if self.kind == "guild" then
+		NO_GUILD.name = R.L.noGuild
+		local key = self.guildKey
+		local alt = not key and not R.GuildBank.atBank and R.UI.charKey and R.db.chars[R.UI.charKey]
+		if alt then
+			-- browsing an alt in Bags: show that alt's guild
+			return (alt.guildKey and R.GuildBank:Record(alt.guildKey)) or NO_GUILD
+		end
+		local g = R.GuildBank:Record(key)
+		if not g and key then self.guildKey = nil; g = R.GuildBank:Record() end
+		return g or NO_GUILD
+	end
 	local c = self.charKey and R.db.chars[self.charKey]
 	if not c then
 		self.charKey = nil
@@ -64,7 +80,54 @@ end
 function UI:IsMe() return self:Char() == R.Data.me end
 
 function UI:Interactive()
+	if self.kind == "guild" then return false end  -- guild rows act through GuildLive instead
 	return self:IsMe() and (self.view == "bags" or R.Data.atBank)
+end
+
+-- Guild Bank window showing the vault that is open right now (items can be moved).
+function UI:GuildLive()
+	return self.kind == "guild" and R.GuildBank:IsLive(self:Char()) and not self.searchAllActive
+end
+
+-- Selected guild tab (number) or nil for all tabs.
+function UI:GuildTab()
+	return self.kind == "guild" and API.GuildTabOf(self.bagFilter) or nil
+end
+
+function UI:SetGuildTab(tab)
+	self.bagFilter = tab and (API.GUILD_BASE + tab) or nil
+	self.offset = 0
+	if tab and self:GuildLive() then R.GuildBank:SelectTab(tab) end
+	R:RequestRefresh()
+end
+
+-- Container list for this window's view.
+function UI:BagList()
+	if self.view == "guild" then return API.GuildBagList end
+	return self.view == "bank" and API.BankBagList or API.InvBagList
+end
+
+-- Guild rows: click picks up (or drops the cursor item into the tab), right-click
+-- withdraws per the guildRightClick setting, drag picks up. Cached views only link.
+function UI:GuildClick(e, button)
+	if not e then return end
+	if IsModifiedClick and HandleModifiedItemClick and IsModifiedClick() and HandleModifiedItemClick(e.link) then return end
+	if not self:GuildLive() then return end
+	if CursorHasItem and CursorHasItem() then return self:DropCursorItem() end
+	local tab, slot = API.GuildTabOf(e.bag), e.slot
+	if not tab then return end
+	if button == "RightButton" then
+		local mode = R.settings.guildRightClick
+		if mode ~= "none" then R.GuildBank:Withdraw(tab, slot, mode == "cursor" and "cursor" or "bags") end
+	else
+		R.GuildBank:Withdraw(tab, slot, "cursor")
+	end
+end
+
+function UI:GuildDrag(e)
+	if not e or not self:GuildLive() then return end
+	local tab = API.GuildTabOf(e.bag)
+	if tab then R.GuildBank:Withdraw(tab, e.slot, "cursor") end
 end
 
 function UI:RowHeight() return R.settings.rowHeight end
@@ -77,7 +140,7 @@ function UI:Create()
 	W:UpdateFonts()
 	local s = R.settings
 
-	local suffix = self.kind == "bank" and "Bank" or ""
+	local suffix = self.suffix
 	local f = CreateFrame("Frame", "RummageFrame" .. suffix, UIParent, API.Backdrop)
 	self.frame = f
 	f:SetFrameStrata("MEDIUM")
@@ -113,6 +176,12 @@ function UI:Create()
 	R:Listen("MONEY_CHANGED", function() UI:UpdateFooter() end)
 	R:Listen("MERCHANT_CHANGED", function() UI:UpdateFooter() end)
 	R:Listen("MOVER_CHANGED", function() UI:UpdateFooter() end)
+	if self.kind == "bags" then
+		-- the Bank / Guild header buttons light up while those windows are open
+		local function sync() if UI.frame:IsShown() then UI:UpdateTabs() end end
+		R:Listen("FRAME_SHOWN", sync)
+		R:Listen("FRAME_HIDDEN", sync)
+	end
 	R:RegisterEvent("PLAYER_REGEN_ENABLED", function()
 		if UI.pendingCombat then
 			UI:SetPending(false)
@@ -142,21 +211,40 @@ function UI:CreateHeader()
 	arrow:SetSize(12, 12)
 	arrow:SetPoint("RIGHT", -4, 0)
 	arrow:SetRotation(-math.pi / 2)
-	W:SetTooltip(charBtn, "Character", "View the bags and bank of any of your characters.")
+	if self.kind == "guild" then
+		W:SetTooltip(charBtn, "Guild", "View the cached guild bank of any guild your characters visited.")
+	else
+		W:SetTooltip(charBtn, "Character", "View the bags and bank of any of your characters.")
+	end
 	self.charBtn = charBtn
 
 	-- tabs
 	self.tabBags = W:Button(header, R.L.bags, 56, 22, function() UI:SetView("bags") end)
 	self.tabBags:SetPoint("LEFT", charBtn, "RIGHT", 6, 0)
-	self.tabBank = W:Button(header, R.L.bank, 56, 22, function() UI:SetView("bank") end)
+	self.tabBank = W:Button(header, R.L.bank, 56, 22, function()
+		if UI.kind == "bags" then R.BankUI:Toggle() else UI:SetView("bank") end
+	end)
 	self.tabBank:SetPoint("LEFT", self.tabBags, "RIGHT", 2, 0)
 	-- One tab per window: Bags shows only "Bags", the Bank window only "Bank".
 	if self.kind == "bank" then
 		self.tabBags:Hide()
 		self.tabBank:ClearAllPoints()
 		self.tabBank:SetPoint("LEFT", charBtn, "RIGHT", 6, 0)
-	else
+	elseif self.kind == "guild" then
+		self.tabBags:Hide()
 		self.tabBank:Hide()
+		-- guild tab selector (the footer's tab icons do the same)
+		local tabSel = W:Button(header, R.L.allTabs, 110, 22, function(btn) UI:ShowGuildTabMenu(btn) end)
+		tabSel:SetPoint("LEFT", charBtn, "RIGHT", 6, 0)
+		W:SetTooltip(tabSel, "Guild bank tab", "Choose which tab to list, or all tabs. Items dropped on this window go into the selected tab (or the vault's current tab when showing all).")
+		self.tabGuild = tabSel
+	else
+		-- Bags: Bank and Guild open those windows beside Bags; anywhere, with the cache when away.
+		W:SetTooltip(self.tabBank, "Bank window", "Opens the Bank window beside Bags. Away from a banker it shows your cached bank (view-only).")
+		local guildBtn = W:Button(header, R.L.guildShort, 50, 22, function() R.GuildUI:Toggle() end)
+		guildBtn:SetPoint("LEFT", self.tabBank, "RIGHT", 2, 0)
+		W:SetTooltip(guildBtn, "Guild Bank window", "Opens the Guild Bank window beside Bags. Away from the guild vault it shows the cached guild bank (view-only).")
+		self.tabGuildToggle = guildBtn
 	end
 
 	-- cross-character search toggle (applies while the search box has text)
@@ -165,10 +253,11 @@ function UI:CreateHeader()
 		UI:UpdateTabs()
 		R:RequestRefresh()
 	end)
-	allBtn:SetPoint("LEFT", self.kind == "bank" and self.tabBank or self.tabBags, "RIGHT", 6, 0)
+	allBtn:SetPoint("LEFT", self.tabGuild or self.tabGuildToggle or self.tabBank, "RIGHT", 6, 0)
 	W:SetTooltip(allBtn, "Search all characters",
 		"When on and you type a search, results come from every character's cached bags and bank. Results are view-only (no item actions) in this mode.")
 	self.allBtn = allBtn
+	if self.kind == "guild" then allBtn:Hide(); allBtn:SetWidth(1) end
 
 	-- right-side buttons
 	local close = W:Button(header, "X", 22, 22, function() UI:Close() end)
@@ -367,9 +456,13 @@ function UI:CreateFooter()
 	total:SetPoint("LEFT", cached, "RIGHT", 10, 0)
 	self.totalText = total
 
+	local currency = W:Text(foot, "small")
+	currency:SetPoint("LEFT", total, "RIGHT", 10, 0)
+	self.currencyText = currency
+
 	-- action buttons (right to left)
 	self.btnTransfer = W:Button(foot, R.L.transfer, 70, 22, function() UI:DoTransfer() end)
-	W:SetTooltip(self.btnTransfer, "Transfer", "Moves every item currently listed (after search/category filters) to the other side: bags to bank, or bank to bags.")
+	W:SetTooltip(self.btnTransfer, "Transfer", "Moves every item currently listed (after search/category filters) to the other side: bags to bank, or bank to bags. With the Send Mail tab or a trade open, adds the listed items to it instead (bound items skipped).")
 	self.btnSort = W:Button(foot, R.L.sort, 46, 22, function()
 		if UI.view == "bank" then
 			if R.Data.atBank and API.SortBankBags then API.SortBankBags() end
@@ -685,6 +778,7 @@ end
 local function bagOrder(bag)
 	for i, b in ipairs(API.InvBagList) do if b == bag then return i end end
 	for i, b in ipairs(API.BankBagList) do if b == bag then return 100 + i end end
+	if API.IsGuildBag(bag) then return 200 + API.GuildTabOf(bag) end
 	return 999
 end
 
@@ -709,7 +803,7 @@ function UI:Refresh()
 	-- All intermediate arrays are module-level scratch tables; nothing is allocated per item.
 	-- Cross-character search swaps the pooled build for snapshot copies and forces
 	-- the window non-interactive for as long as it's active.
-	self.searchAllActive = R.settings.searchAllChars and self.search ~= "" or false
+	self.searchAllActive = R.settings.searchAllChars and self.search ~= "" and self.kind ~= "guild" or false
 	local entries
 	if self.searchAllActive then
 		entries = self:BuildAllChars(self.view)
@@ -804,6 +898,11 @@ function UI:GroupInfo(e)
 		return qualityKey[q], -q, qualityLabel[q]
 	elseif g == "bag" then
 		local b = e.bag
+		if API.IsGuildBag(b) then
+			local rec = self:Char().containers[b]
+			if not bagKey[b] then bagKey[b] = "b" .. b end
+			return bagKey[b], bagOrder(b), (rec and rec.name) or API.BagLabel(b)
+		end
 		if not bagKey[b] then bagKey[b] = "b" .. b; bagLabel[b] = API.BagLabel(b) end
 		return bagKey[b], bagOrder(b), bagLabel[b]
 	end
@@ -1072,6 +1171,7 @@ local function RowOnEnter(row)
 		GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
 		GameTooltip:SetHyperlink(e.link)
 		if e.count > 1 then GameTooltip:AddLine("Count: " .. e.count, 1, 1, 1) end
+		UI:AddGuildHint(GameTooltip, e)
 		GameTooltip:Show()
 	end
 end
@@ -1089,6 +1189,7 @@ local function RowOnMouseUp(row, button)
 		return
 	end
 	local e = row.entry
+	if UI.kind == "guild" then return UI:GuildClick(e, button) end
 	if e and not row.interactive and button == "LeftButton" and IsModifiedClick and HandleModifiedItemClick then
 		HandleModifiedItemClick(e.link)
 	end
@@ -1121,6 +1222,11 @@ function UI:GetListRow(i)
 	row:SetScript("OnEnter", RowOnEnter)
 	row:SetScript("OnLeave", RowOnLeave)
 	row:SetScript("OnMouseUp", RowOnMouseUp)
+	if self.kind == "guild" then
+		row:RegisterForDrag("LeftButton")
+		row:SetScript("OnDragStart", function(r) UI:GuildDrag(r.entry) end)
+		row:SetScript("OnReceiveDrag", function() UI:DropCursorItem() end)
+	end
 	self.rows[i] = row
 	return row
 end
@@ -1375,10 +1481,17 @@ local function MakeGridCell(parent)
 		if e and not self.interactive then
 			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
 			GameTooltip:SetHyperlink(e.link)
+			UI:AddGuildHint(GameTooltip, e)
 			GameTooltip:Show()
 		end
 	end)
 	c:SetScript("OnLeave", function() GameTooltip:Hide() end)
+	if UI.kind == "guild" then
+		c:RegisterForDrag("LeftButton")
+		c:SetScript("OnMouseUp", function(self, button) UI:GuildClick(self.entry, button) end)
+		c:SetScript("OnDragStart", function(self) UI:GuildDrag(self.entry) end)
+		c:SetScript("OnReceiveDrag", function() UI:DropCursorItem() end)
+	end
 	return c
 end
 
@@ -1532,10 +1645,12 @@ function UI:Render()
 	if #display == 0 then
 		local char = self:Char()
 		local cached = false
-		for _, bag in ipairs(self.view == "bank" and API.BankBagList or API.InvBagList) do
+		for _, bag in ipairs(self:BagList()) do
 			if char.containers[bag] then cached = true; break end
 		end
-		if self.view == "bank" and not cached then
+		if self.view == "guild" and not cached then
+			text = R.L.emptyGuild
+		elseif self.view == "bank" and not cached then
 			text = R.L.emptyBank
 		elseif self.search ~= "" or self.category ~= "all" or self.bagFilter then
 			text = R.L.nothingMatches
@@ -1759,10 +1874,64 @@ end
 
 function UI:UpdateTabs()
 	self.tabBags:SetActive(self.view == "bags")
-	self.tabBank:SetActive(self.view == "bank")
+	if self.kind == "bags" then
+		self.tabBank:SetActive(R.BankUI.frame and R.BankUI.frame:IsShown() or false)
+		self.tabGuildToggle:SetActive(R.GuildUI.frame and R.GuildUI.frame:IsShown() or false)
+	else
+		self.tabBank:SetActive(self.view == "bank")
+	end
 	if self.allBtn then self.allBtn:SetActive(R.settings.searchAllChars) end
 	local c = self:Char()
+	if self.kind == "guild" then
+		self.charBtn:SetLabel("|cff40c040" .. (c.name or "?") .. "|r")
+		local tab = self:GuildTab()
+		local rec = tab and c.containers[API.GUILD_BASE + tab]
+		self.tabGuild:SetLabel(tab and (rec and rec.name or ("Tab " .. tab)) or R.L.allTabs)
+		return
+	end
 	self.charBtn:SetLabel(R.ClassColorText(c.class, c.name or "?"))
+end
+
+-- Footer status for the Guild Bank window: live limits, or the cache's age.
+function UI:GuildFooterText(c)
+	if self:GuildLive() then
+		if not R.settings.guildFooterLimits then return "" end
+		local tab = self:GuildTab() or tonumber(R.GuildBank.Call("GetCurrentGuildBankTab"))
+		local lim = tab and R.GuildBank:Limits(tab)
+		if not lim then return "" end
+		local rec = c.containers[API.GUILD_BASE + tab]
+		local left = lim.remaining
+		return ((rec and rec.name) or ("Tab " .. tab)) .. ": "
+			.. ((left == nil or left < 0) and "unlimited withdrawals" or (left .. " withdrawal" .. (left == 1 and "" or "s") .. " left"))
+			.. (lim.deposit and "" or ", no deposits")
+	end
+	if c == NO_GUILD then return "" end
+	local age = c.lastSeen and R.FormatAge(c.lastSeen) or ""
+	return R.L.cachedGuild .. (age ~= "" and (" · seen " .. age .. " ago") or "")
+end
+
+-- Withdrawal / deposit permissions for a live guild tab.
+function UI:AddGuildLimits(tt, tab)
+	if not (tab and self:GuildLive()) then return end
+	local lim = R.GuildBank:Limits(tab)
+	if not lim then return end
+	local left = lim.remaining
+	tt:AddLine((left == nil or left < 0) and "Withdrawals: unlimited" or ("Withdrawals left today: " .. left), 1, 1, 1)
+	if not lim.deposit then tt:AddLine("You can't deposit in this tab", 1, 0.4, 0.4) end
+end
+
+function UI:AddGuildHint(tt, e)
+	if self.kind ~= "guild" or not e then return end
+	local tab = API.GuildTabOf(e.bag)
+	local rec = tab and self:Char().containers[e.bag]
+	if rec then tt:AddLine("Guild bank: " .. (rec.name or ("Tab " .. tab)), 0.25, 0.75, 0.25) end
+	if self:GuildLive() then
+		self:AddGuildLimits(tt, tab)
+		local rc = R.settings.guildRightClick
+		tt:AddLine("Click or drag: pick up" .. (rc == "bags" and "   Right-click: to bags" or (rc == "cursor" and "   Right-click: pick up" or "")), 0.6, 0.6, 0.6)
+	else
+		tt:AddLine("Cached view: open the guild vault to move items", 0.6, 0.6, 0.6)
+	end
 end
 
 function UI:SetView(view)
@@ -1783,6 +1952,19 @@ local function BagButtonOnEnter(self)
 	GameTooltip:SetOwner(self, "ANCHOR_TOP")
 	local c = UI:Char()
 	local rec = c.containers[bag]
+	if API.IsGuildBag(bag) then
+		GameTooltip:SetText(rec and rec.name or API.BagLabel(bag))
+		if rec then
+			local used = 0
+			for _ in pairs(rec.slots) do used = used + 1 end
+			GameTooltip:AddLine(format("%d / %d slots used", used, rec.size or 0), 0.8, 0.8, 0.8)
+		end
+		UI:AddGuildLimits(GameTooltip, API.GuildTabOf(bag))
+		GameTooltip:AddLine("Click: show only this tab (click again for all tabs)", 0.6, 0.6, 0.6)
+		if UI:GuildLive() then GameTooltip:AddLine("Drop an item here: deposit it in this tab", 0.6, 0.6, 0.6) end
+		GameTooltip:Show()
+		return
+	end
 	if self.locked then
 		GameTooltip:SetText("Bank bag slot (locked)")
 		if R.Data.atBank and UI:IsMe() and GetBankSlotCost then
@@ -1806,6 +1988,15 @@ local function BagButtonOnEnter(self)
 end
 
 local function BagButtonOnClick(self, button)
+	if API.IsGuildBag(self.bag) then
+		local tab = API.GuildTabOf(self.bag)
+		if UI:GuildLive() and CursorHasItem and CursorHasItem() then
+			R.GuildBank:Deposit(tab)
+			return
+		end
+		UI:SetGuildTab(UI.bagFilter ~= self.bag and tab or nil)
+		return
+	end
 	if self.locked then
 		if R.Data.atBank and UI:IsMe() then R.popupUI = UI; StaticPopup_Show("RUMMAGE_BUY_BANK_SLOT") end
 		return
@@ -1828,7 +2019,7 @@ end
 function UI:UpdateBagBar()
 	for _, b in ipairs(self.bagButtons) do b:Hide() end
 	local c = self:Char()
-	local list = self.view == "bank" and API.BankBagList or API.InvBagList
+	local list = self:BagList()
 	local x, n = 0, 0
 	local interactive = self:Interactive()
 	for _, bag in ipairs(list) do
@@ -1890,7 +2081,7 @@ function UI:UpdateFooter()
 	local c = self:Char()
 	self.moneyBtn.text:SetText(R.FormatMoney(c.money or 0) ~= "" and R.FormatMoney(c.money or 0) or "0")
 	self.moneyBtn:SetWidth(math.max(60, self.moneyBtn.text:GetStringWidth() + 4))
-	local list = self.view == "bank" and API.BankBagList or API.InvBagList
+	local list = self:BagList()
 	local free, total = R.Data:FreeSlots(c, list)
 	self.freeText:SetText(format(R.L.freeFmt, free, total))
 	if free <= (R.settings.lowSpaceWarn or 0) and total > 0 then self.freeText:SetTextColor(1, 0.3, 0.3)
@@ -1898,12 +2089,14 @@ function UI:UpdateFooter()
 	self:UpdateBagBar()
 
 	local cachedMsg = ""
-	if not self:IsMe() then
+	if self.kind == "guild" then
+		cachedMsg = self:GuildFooterText(c)
+	elseif not self:IsMe() then
 		cachedMsg = "Cached · seen " .. (R.FormatAge(c.lastSeen) ~= "" and R.FormatAge(c.lastSeen) or "?") .. " ago"
 	elseif self.view == "bank" and not R.Data.atBank then
 		cachedMsg = R.L.cachedBank
 	end
-	local stale = not self:IsMe() and R.IsStale(c)
+	local stale = not self:IsMe() and not self:GuildLive() and R.IsStale(c)
 	if stale then
 		cachedMsg = cachedMsg .. " (stale)"
 		self.cachedText:SetTextColor(0.85, 0.4, 0.4)
@@ -1930,6 +2123,7 @@ function UI:UpdateFooter()
 		end
 	end
 	self.totalText:SetText(totText)
+	self.currencyText:SetText((R.settings.showCurrencies and self.kind == "bags") and R.Data:CurrencyText(c) or "")
 
 	local interactive = self:Interactive() and not self.searchAllActive
 	local merchant = R.Junk.MerchantOpen()
@@ -1942,10 +2136,14 @@ function UI:UpdateFooter()
 	local canSort = interactive and ((self.view == "bags" and API.SortBags) or (self.view == "bank" and API.SortBankBags))
 	self.btnSort:SetShown(canSort and true or false)
 	if canSort then buttons[#buttons + 1] = self.btnSort end
-	local canTransfer = self:IsMe() and R.Data.atBank
+	-- mail / trade target (bags only, live): wins over the bank so "To Mail" works at a mailbox
+	local target = interactive and self.view == "bags" and R.Mover:OpenTarget()
+	self.transferTarget = target or nil
+	local canTransfer = target or (self:IsMe() and R.Data.atBank)
 	self.btnTransfer:SetShown(canTransfer and true or false)
 	if canTransfer then
-		self.btnTransfer:SetLabel(self.view == "bank" and R.L.toBags or R.L.toBank)
+		if target then self.btnTransfer:SetLabel(R.Mover.targets[target].label)
+		else self.btnTransfer:SetLabel(self.view == "bank" and R.L.toBags or R.L.toBank) end
 		buttons[#buttons + 1] = self.btnTransfer
 	end
 	local busy = R.Mover:Busy()
@@ -1976,7 +2174,17 @@ function UI:ShowMoneyTooltip(anchor)
 end
 
 function UI:DoTransfer()
-	if not R.Data.atBank or self.searchAllActive then return end
+	if self.searchAllActive then return end
+	local target = self.view == "bags" and self:Interactive() and R.Mover:OpenTarget()
+	if target then
+		-- mail and trade hold only a few items, so no "move everything?" prompt
+		local entries = {}
+		for _, e in ipairs(self.entries or {}) do
+			if not (API.KEYRING and e.bag == API.KEYRING) then entries[#entries + 1] = e end
+		end
+		return R.Mover:SendTo(target, entries)
+	end
+	if not R.Data.atBank then return end
 	if self.bagFilter == nil and self.search == "" and self.category == "all" and not self.transferConfirmed then
 		R.popupUI = UI; StaticPopup_Show("RUMMAGE_CONFIRM_TRANSFER", self.view == "bank" and "bags" or "bank")
 		return
@@ -1991,8 +2199,18 @@ end
 
 -- Drop the item on the cursor into the first free slot of the current view.
 function UI:DropCursorItem()
-	if not (CursorHasItem and CursorHasItem()) or not self:Interactive() or self.searchAllActive then return end
-	local list = self.view == "bank" and API.BankBagList or API.InvBagList
+	if not (CursorHasItem and CursorHasItem()) then return end
+	if self.kind == "guild" then
+		if self:GuildLive() then return R.GuildBank:Deposit(self:GuildTab()) end
+		R:Print(R.L.cachedDropGuild)
+		return
+	end
+	if self.kind == "bank" and not self:Interactive() then
+		R:Print(R.L.cachedDropBank)
+		return
+	end
+	if not self:Interactive() or self.searchAllActive then return end
+	local list = self:BagList()
 	local _, itemID = GetCursorInfo()
 	for _, bag in ipairs(list) do
 		if not (API.KEYRING and bag == API.KEYRING) then
@@ -2069,7 +2287,11 @@ end
 function UI:OnShow()
 	R.Integrations:ResetPawn()
 	if R.settings.resetSearchOnOpen and self.search ~= "" then self.searchBox:SetText("") end
-	if not R.settings.rememberCategory then self:SetCategory("all"); self.subfilter = nil; self.bagFilter = nil end
+	if not R.settings.rememberCategory then
+		self:SetCategory("all"); self.subfilter = nil
+		-- the Guild Bank's tab choice is set by the vault (guildDefaultTab), not a bag filter to forget
+		if self.kind ~= "guild" then self.bagFilter = nil end
+	end
 	if SOUNDKIT and SOUNDKIT.IG_BACKPACK_OPEN then PlaySound(SOUNDKIT.IG_BACKPACK_OPEN) end
 	self:ApplySkin()
 	self:Refresh()
@@ -2085,6 +2307,10 @@ function UI:OnHide()
 	-- Only the Bank window closes the banker; hiding Bags leaves the bank open.
 	if self.kind == "bank" and R.Data.atBank and R.settings.replaceBank and CloseBankFrame then
 		CloseBankFrame()
+	end
+	-- Likewise only the Guild Bank window closes the guild vault.
+	if self.kind == "guild" and R.GuildBank.atBank and R.settings.replaceGuildBank then
+		R.GuildBank.Call("CloseGuildBankFrame")
 	end
 	R:Fire("FRAME_HIDDEN")
 end

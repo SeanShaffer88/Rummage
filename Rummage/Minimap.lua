@@ -13,6 +13,8 @@ local ICON = R.media .. "Icon"
 local function OnClick(button)
 	if button == "RightButton" then
 		R.Options:Toggle()
+	elseif IsControlKeyDown and IsControlKeyDown() then
+		R.GuildUI:Toggle()
 	elseif button == "MiddleButton" or IsShiftKeyDown() then
 		R.BankUI:Toggle()
 	else
@@ -27,6 +29,7 @@ local function Tooltip(tt)
 	tt:AddLine(" ")
 	tt:AddLine(R.L.mmBags, 0.8, 0.8, 0.8)
 	tt:AddLine(R.L.mmBank, 0.8, 0.8, 0.8)
+	tt:AddLine(R.L.mmGuild, 0.8, 0.8, 0.8)
 	tt:AddLine(R.L.mmSettings, 0.8, 0.8, 0.8)
 end
 

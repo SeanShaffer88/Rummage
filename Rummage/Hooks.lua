@@ -114,6 +114,72 @@ function Hooks:InitBank()
 end
 
 ---------------------------------------------------------------------------
+-- Guild bank (1.9.0): its own window, like the Bank. Blizzard_GuildBankUI is
+-- load-on-demand, so its frame is hidden when it loads (before it is first shown).
+---------------------------------------------------------------------------
+local function HideGuildBankFrame()
+	local f = _G.GuildBankFrame
+	if not f or f.rummageHidden or not R.settings.replaceGuildBank then return end
+	-- Without the guild bank API Rummage can't show the vault: leave Blizzard's frame alone.
+	if not R.GuildBank:Available() or type(_G.GetGuildInfo) ~= "function" then return end
+	f.rummageHidden = true
+	-- Its OnHide closes the vault: keep it from running while the frame is reparented.
+	local onHide = f.GetScript and f:GetScript("OnHide")
+	if onHide and f:IsShown() then f:SetScript("OnHide", nil) end
+	f:SetParent(hidden)
+	if onHide and f:GetScript("OnHide") == nil then f:SetScript("OnHide", onHide) end
+end
+Hooks.HideGuildBankFrame = HideGuildBankFrame
+
+local function GuildOpened()
+	local GB = R.GuildBank
+	if GB.atBank then return end
+	GB:OnOpened()
+	if not GB.atBank or not R.settings.replaceGuildBank then return end
+	HideGuildBankFrame()
+	local Bags, Guild = R.UI, R.GuildUI
+	Guild.guildKey = nil  -- always show the open vault
+	if R.settings.guildDefaultTab == "current" then
+		local cur = tonumber(GB.Call("GetCurrentGuildBankTab"))
+		Guild.bagFilter = cur and (R.API.GUILD_BASE + cur) or nil
+	else
+		Guild.bagFilter = nil
+	end
+	Bags.openedByGuild = not Bags.frame:IsShown()
+	if R.settings.autoOpen.guild ~= false or Bags.frame:IsShown() then
+		Guild:Open()
+		if R.settings.guildOpenBags and not Bags.frame:IsShown() then Bags:Open() end
+	end
+	R:RequestRefresh()
+end
+
+local function GuildClosed()
+	if not R.GuildBank:OnClosed() then return end
+	local Bags, Guild = R.UI, R.GuildUI
+	if Guild.frame:IsShown() then Guild:Close() end
+	if Bags.openedByGuild and Bags.frame:IsShown() and not R.Data.atBank then Bags:Close() end
+	Bags.openedByGuild = false
+	R:RequestRefresh()
+end
+
+function Hooks:InitGuildBank()
+	R.GuildBank:Init()
+	HideGuildBankFrame()
+	R:RegisterEvent("ADDON_LOADED", function(_, name)
+		if name == "Blizzard_GuildBankUI" then HideGuildBankFrame() end
+	end)
+	R:RegisterEvent("GUILDBANKFRAME_OPENED", GuildOpened)
+	R:RegisterEvent("GUILDBANKFRAME_CLOSED", GuildClosed)
+	-- Newer clients announce the vault through the interaction manager instead.
+	local PIT = Enum and Enum.PlayerInteractionType
+	local banker = PIT and PIT.GuildBanker
+	if banker then
+		R:RegisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_SHOW", function(_, t) if t == banker then GuildOpened() end end)
+		R:RegisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_HIDE", function(_, t) if t == banker then GuildClosed() end end)
+	end
+end
+
+---------------------------------------------------------------------------
 -- Keybinds: route "Open All Bags" (and optionally the per-bag keys) to Rummage.
 -- Uses override bindings, so the player's saved keybinds are never modified.
 ---------------------------------------------------------------------------
@@ -262,5 +328,6 @@ function Hooks:Init()
 	self:RegisterPopups()
 	self:InitBags()
 	self:InitBank()
+	self:InitGuildBank()
 	self:InitBindings()
 end

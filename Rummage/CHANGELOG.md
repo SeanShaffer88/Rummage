@@ -1,5 +1,41 @@
 # Changelog
 
+## 1.9.0 — 2026-11-15
+
+Audit against the other bag addons (Baganator, Bagnon, BetterBags, AdiBags, ArkInventory, Sorted, Combuctor, LiteBag); report in `docs/COMPARISON.md`. Passes the offline suite (45 cases); not yet run in game.
+
+**Fixes**
+- **Junk sale re-checks each slot.** Selling runs over several ticks; an item moved into a slot after the junk list was built could be sold. Each slot is now checked against the listed item right before selling, and the chat total reports what was really sold (and says so when the merchant closed early).
+- **`/rum buyback all` buys each item once.** Buyback is answered by the server later, so two log entries with the same link could both hit the same buyback slot and then buy whatever shifted into it. The plan is now made first, each slot is claimed once, and the highest slot is bought first.
+- **Guild repair honours the withdraw limit.** When the guild's daily limit doesn't cover the cost, auto-repair now uses your own gold instead of failing and printing "Repaired with guild funds".
+- **Can I Mog It? on alts and the cached bank** no longer receives the current character's bag/slot (same class of bug as the 1.1.0 Scrap fix).
+- **Settings import** no longer drops every custom category after a gap in the numbering.
+- **Search** no longer lower-cases type/subtype/slot per item per refresh (precomputed once per item).
+- **"Toggle bank" key binding** opened the Bags window instead of the Bank window since 1.8.0.
+
+**New**
+- **Transfer to mail or trade.** With the Send Mail tab or a trade window open, the footer's Transfer button reads *To Mail* / *To Trade* and adds the listed items (after search and filters) until the window is full. Bound items are skipped. Setting: *Transfer to an open mail or trade window*.
+- **Tracked currencies.** Up to three currencies marked *Show on backpack* appear in the Bags footer, cached per character so alts show theirs. Setting: *Show tracked currencies in the footer*.
+- **Equipment sets.** `#set` matches items in any equipment set and `set:name` items in a matching set. Items in an equipment set are never sold as junk. *Unverified*: which equipment-set API Forever provides (`/rum apicheck` lists it).
+- **Plugin API** on the global `Rummage` table: `RegisterSearchKeyword`, `RegisterCategory` / `UnregisterCategory`, `RegisterColumn`, `GetAPIVersion`. Plugin functions run under `pcall`; built-in keywords can't be replaced.
+- `/rum apicheck` also reports the equipment-set, currency, mail/trade and guild-withdraw APIs.
+
+**Guild Bank window** (the largest gap in `docs/COMPARISON.md`). *Unverified in game*: whether Forever provides the guild bank APIs at all (`/rum apicheck` lists each one; without them the window stays empty and Blizzard's frame is untouched).
+- **Its own window, like the Bank.** Opening the guild vault opens the Guild Bank window and, if it was closed, Bags beside it (Guild Bank defaults to the left of Bags). Items can be dragged between Bags, Guild Bank and Bank. Blizzard's guild bank frame is hidden. Closing the Guild Bank window closes the vault; closing Bags doesn't. Leaving the vault closes the Guild Bank window, and Bags too if the visit opened it.
+- **Own geometry.** Position, size, scale and per-view layout are stored under `guild` in the saved settings; `/rum reset` and *Reset Guild Bank window position* reset it.
+- **Tabs.** A tab selector in the header (each tab with its icon and used/total slots, or *All tabs*), and the footer shows one icon per tab: click to show only that tab, click again for all. Selecting a tab also selects it in the vault. Tabs you can't view are marked *(no access)*.
+- **Deposit.** Drop an item from Bags anywhere on the Guild Bank window (or on a tab icon) and it goes into the first free slot of that tab, or of the vault's current tab while showing all tabs. Tabs without deposit rights, full tabs and tabs still loading are reported in chat.
+- **Withdraw.** Click or drag an item to pick it up, then drop it on Bags or a bag slot. Right-click withdraws straight into the bags (configurable). The daily withdrawal limit of each tab is respected (and counted down locally until the server answers), and full bags are reported.
+- **Cached per guild.** Every tab is queried once per visit, one at a time, and stored per guild in `RummageDB.guilds` (sanitized at load). Away from the vault the window shows the cache, view-only, with its age in the footer. The guild button lists every cached guild; the X next to one forgets it.
+- **Tooltips** list the count in each cached guild bank under the character counts.
+- **Settings** (General tab, *Guild bank*): replace Blizzard's guild bank, open automatically at the vault, also open Bags beside it, open on the current tab or all tabs, right-click action (withdraw to bags / pick up / nothing), withdrawals left in the footer, guild counts in tooltips.
+- `/rum guild` (or `/rum gbank`), a key binding and Ctrl-click on the minimap button toggle the Guild Bank window.
+
+**Bank and Guild Bank anywhere.**
+- The Bags header has **Bank** and **Guild** buttons that open those windows beside Bags (and light up while open). Away from a banker or the guild vault they show the cached contents, view-only, with a *Cached bank* / *Cached guild bank* footer note. Nothing is queried or moved while away; dropping an item on a cached window prints a hint instead.
+- With nothing cached (or no guild) the Guild Bank window says so, like the Bank window does.
+- Each character remembers its guild, so browsing an alt in Bags shows that alt's guild bank in the Guild Bank window.
+
 ## 1.8.1 — 2026-11-10
 
 - **Fix:** opening a window in combat raised ADDON_ACTION_BLOCKED (`SetPropagateKeyboardInput`). Keyboard calls are now skipped in combat; navigation stays off there as before.

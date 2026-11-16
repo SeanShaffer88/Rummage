@@ -58,10 +58,11 @@ function UI:HandleNavKey(key)
 	local s = R.settings
 	if not s.keyboardNav or InCombatLockdown() then return false end
 	if self.searchBox and self.searchBox:HasFocus() then return false end
-	-- Two windows can be open (Bags + Bank): keys go to the one under the mouse.
-	local other = (self.kind == "bank") and R.UI or R.BankUI
-	if other and other.frame and other.frame:IsShown() and self.frame.IsMouseOver and not self.frame:IsMouseOver() then
-		return false
+	-- Several windows can be open (Bags, Bank, Guild Bank): keys go to the one under the mouse.
+	if self.frame.IsMouseOver and not self.frame:IsMouseOver() then
+		for _, other in ipairs(R.UIList) do
+			if other ~= self and other.frame and other.frame:IsShown() then return false end
+		end
 	end
 	local list = self:NavEntries()
 	if key == "ESCAPE" then self.selected = nil; return false end
