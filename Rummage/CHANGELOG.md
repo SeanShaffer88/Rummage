@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.10.0 — 2026-11-16
+
+Passes the offline suite (55 cases); not yet run in game.
+
+**New**
+- **Drag an item onto a category.** Drop an item (from Bags, Bank or Guild Bank) on one of your own categories in the sidebar and it belongs there from then on, whatever the category's filter says; the item itself goes back where it came from. Drop it on **+** to start a new category holding just that item. A category with added items and no filter shows only those items. Right-click a category to see its added items and remove them (one at a time or all). Built-in categories don't take items and say so. Added items are part of settings export/import.
+- **Search groups and phrases.** `( )` groups terms, `!` negates a group, and `"quoted text"` keeps its spaces: `(q:rare | q:epic) ilvl>20`, `!(#junk | q:poor)`, `name:"of the bear"`. A quoted term is always plain text. Existing searches work as before.
+
+**Changed**
+- **`#upgrade` works without Pawn.** With *Judge by item level without Pawn* on, it uses the upgrade popup's rules: higher item level than what you wear in that slot, or an empty slot, for gear you can use (armor type, dual-wield and two-handers handled). Pawn still decides when installed.
+- **`#usable` checks more than level.** Class, armor and weapon proficiency and profession requirements count too, read from the red text in the item's tooltip (cached per item until you level, learn a skill or change talents). *Tint items you can't use* uses the same check.
+
+**Code**
+- `UI.lua` (about 2,400 lines) is split: item rows, grid and secure buttons in `UI_Rows.lua`, the sidebar and chips in `UI_Sidebar.lua`, the footer in `UI_Footer.lua`. Shared layout constants live in `R.UIK`.
+
 ## 1.9.2 — 2026-11-16
 
 Fixes from in-game screenshots of 1.9.1. Passes the offline suite (50 cases); not yet run in game.

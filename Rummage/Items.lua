@@ -254,6 +254,67 @@ R:RegisterEvent("EQUIPMENT_SETS_CHANGED", function()
 	R:RequestRefresh()
 end)
 
+---------------------------------------------------------------------------
+-- Usable by this character (1.10.0). Level is checked first; then the item's tooltip
+-- is scanned once per link for red text (class, armor/weapon proficiency, profession,
+-- level), the same signal the upgrade popup uses. Unknown (data not loaded, tooltip
+-- unavailable) counts as usable and is not cached, so it is checked again later.
+---------------------------------------------------------------------------
+local usableCache, usableCount = {}, 0
+local usableTip
+
+local function TipUsable(link)
+	if not usableTip then
+		local ok, tip = pcall(CreateFrame, "GameTooltip", "RummageUsableScanTooltip", nil, "GameTooltipTemplate")
+		if not ok or not tip then return nil end
+		usableTip = tip
+	end
+	usableTip:SetOwner(WorldFrame, "ANCHOR_NONE")
+	usableTip:ClearLines()
+	if not pcall(usableTip.SetHyperlink, usableTip, link) then return nil end
+	local n = usableTip:NumLines() or 0
+	if n < 2 then return nil end
+	for i = 2, n do
+		for _, side in ipairs({ "Left", "Right" }) do
+			local fs = _G["RummageUsableScanTooltipText" .. side .. i]
+			if fs and fs:IsShown() then
+				local txt = fs:GetText()
+				if not R.IsSecret(txt) and (txt or "") ~= "" then
+					local r, g, b = fs:GetTextColor()
+					if not (R.IsSecret(r) or R.IsSecret(g) or R.IsSecret(b)) and r > 0.9 and g < 0.2 and b < 0.2 then
+						return false
+					end
+				end
+			end
+		end
+	end
+	return true
+end
+
+function Items:Usable(e)
+	local inf = e and e.info
+	if inf and (inf.req or 0) > (UnitLevel("player") or 0) then return false end
+	local link = e and e.link
+	if not link then return true end
+	local v = usableCache[link]
+	if v == nil then
+		v = TipUsable(link)
+		if v == nil then return true end
+		if usableCount >= INFO_CACHE_MAX then wipe(usableCache); usableCount = 0 end
+		usableCache[link] = v
+		usableCount = usableCount + 1
+	end
+	return v
+end
+
+function Items:ResetUsable()
+	wipe(usableCache); usableCount = 0
+end
+
+for _, ev in ipairs({ "PLAYER_LEVEL_UP", "SKILL_LINES_CHANGED", "LEARNED_SPELL_IN_TAB", "CHARACTER_POINTS_CHANGED" }) do
+	R:RegisterEvent(ev, function() Items:ResetUsable(); R:RequestRefresh() end)
+end
+
 function Items:IsKey(e)
 	return (API.KEYRING and e.bag == API.KEYRING) or (e.info and e.info.class == 13)
 end

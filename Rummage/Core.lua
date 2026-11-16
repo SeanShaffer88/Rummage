@@ -191,6 +191,8 @@ R.L = {
 	emptyGuild = "No guild bank data yet. Visit your guild bank on this character.",
 	cachedDropBank = "Cached bank: visit a banker to move items into it.",
 	cachedDropGuild = "Cached guild bank: open the guild vault to move items into it.",
+	dropOnCustom = "Drop items on one of your own categories, or on + to make one.",
+	catAdded = "Added %s to %s.", catAlready = "%s is already in %s.", catFull = "%s holds the maximum of %d added items.",
 	noGuild = "No guild", notInGuild = "You're not in a guild.", cachedGuild = "Cached guild bank",
 	nothingMatches = "Nothing matches.", empty = "Empty.",
 	mmFree = "%d / %d bag slots free",
@@ -604,6 +606,18 @@ function R:InitDB()
 		if type(c) == "table" and type(c.name) == "string" then
 			if type(c.query) ~= "string" then c.query = "" end
 			if c.icon ~= nil and type(c.icon) ~= "string" and type(c.icon) ~= "number" then c.icon = nil end
+			-- 1.10.0: items added by dragging, { [itemID] = true }
+			if type(c.items) == "table" then
+				local items, n = {}, 0
+				for id, v in pairs(c.items) do
+					if type(id) == "number" and id > 0 and id == math.floor(id) and v == true and n < 500 then
+						items[id] = true; n = n + 1
+					end
+				end
+				c.items = n > 0 and items or nil
+			else
+				c.items = nil
+			end
 			cats[#cats + 1] = c
 		end
 	end
@@ -773,6 +787,12 @@ function R:ExportSettings()
 		out[#out + 1] = "cat" .. i .. ".name=" .. Esc(def.name or "")
 		out[#out + 1] = "cat" .. i .. ".query=" .. Esc(def.query or "")
 		if def.icon ~= nil then out[#out + 1] = "cat" .. i .. ".icon=" .. Esc(def.icon) end
+		if def.items and next(def.items) then
+			local ids = {}
+			for id in pairs(def.items) do ids[#ids + 1] = id end
+			table.sort(ids)
+			out[#out + 1] = "cat" .. i .. ".items=" .. concat(ids, ",")
+		end
 	end
 	for i, q in ipairs(R.db.junkRules) do
 		out[#out + 1] = "rule" .. i .. "=" .. Esc(q)
@@ -820,7 +840,7 @@ function R:ImportSettings(str)
 		local ruleIdx = path:match("^rule(%d+)$")
 		if catIdx then
 			catIdx = tonumber(catIdx)
-			if catKey == "name" or catKey == "query" or catKey == "icon" then
+			if catKey == "name" or catKey == "query" or catKey == "icon" or catKey == "items" then
 				catFields[catIdx] = catFields[catIdx] or {}
 				catFields[catIdx][catKey] = Unesc(raw)
 			end
@@ -862,7 +882,13 @@ function R:ImportSettings(str)
 		if f.name and f.name ~= "" then
 			local icon = f.icon
 			if icon and tonumber(icon) then icon = tonumber(icon) end
-			newCats[#newCats + 1] = { name = f.name, query = f.query or "", icon = icon }
+			local items
+			local n = 0
+			for id in (f.items or ""):gmatch("%d+") do
+				id = tonumber(id)
+				if id and id > 0 and n < 500 then items = items or {}; items[id] = true; n = n + 1 end
+			end
+			newCats[#newCats + 1] = { name = f.name, query = f.query or "", icon = icon, items = items }
 		end
 	end
 	local hasCats = false
