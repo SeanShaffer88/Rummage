@@ -990,7 +990,7 @@ test("away from the bank: no cache shows the empty state; /rum guild and /rum ba
   env.SlashCmdList.RUMMAGE("guild"); env.__settle(4)
   local Guild, Bank = R.GuildUI, R.BankUI
   assert(Guild.frame:IsShown() and #Guild.entries == 0, "guild window opens without a cache")
-  assert(Guild.emptyText:GetText() == R.L.emptyGuild and Guild:Char().name == R.L.noGuild, Guild.emptyText:GetText())
+  assert(Guild.emptyText:GetText() == R.L.notInGuild and Guild:Char().name == R.L.noGuild, Guild.emptyText:GetText())
   -- guild info arriving after login: the window names the guild even with nothing cached
   env.GetGuildInfo = function() return "Bears", "Member", 3, nil end
   env.__ev("PLAYER_GUILD_UPDATE"); env.__settle(4)
@@ -1159,4 +1159,23 @@ test("upgrading to DB v5 turns the icon rail on once", function()
     e.RummageDB = { version = 5, settings = { compactSidebar = false }, chars = {} }
   end)
   assert(R2.settings.compactSidebar == false, "a later choice is kept")
+end)
+
+test("name column fills the window once the list's real width is known", function()
+  local env, R = boot()
+  open(env, R)
+  local UI = R.UI
+  local function nameW() for _, L in ipairs(UI.colLayout) do if L.col.key == "name" then return L.w end end end
+  -- Layout ran before the list had a size: the name column falls back to its minimum
+  UI.list:SetWidth(0); UI:ComputeColumns()
+  local early = nameW()
+  -- the list's anchors resolve to its real width: columns are recomputed, name fills it
+  UI.list:SetWidth(900); env.__settle(2)
+  local fixed = 0
+  for _, L in ipairs(UI.colLayout) do if L.col.key ~= "name" then fixed = fixed + L.w + 4 end end
+  assert(nameW() > early and nameW() >= 900 - 14 - fixed - 10, "name " .. nameW() .. " (was " .. early .. ")")
+  -- the same width again does not recompute
+  local v = UI.colVersion
+  UI.list:SetWidth(900); env.__settle(2)
+  assert(UI.colVersion == v, "no recompute for an unchanged width")
 end)

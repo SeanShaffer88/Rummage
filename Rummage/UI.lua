@@ -394,6 +394,17 @@ function UI:CreateContent()
 	end)
 	list:SetScript("OnReceiveDrag", function() UI:DropCursorItem() end)
 	list:SetScript("OnMouseUp", function() UI:DropCursorItem() end)
+	-- Layout() measures the list right after re-anchoring it, before the new anchors
+	-- resolve, so the width it sees can be stale (or 0 on first show). Recompute the
+	-- columns once the list's real width is known, or Name stays at its minimum.
+	list:SetScript("OnSizeChanged", function(_, w)
+		if not (w and w > 0) or w == UI.colListW then return end
+		R:Defer("columns" .. UI.suffix, function()
+			if not UI.frame or not UI.frame:IsShown() then return end
+			UI:ComputeColumns()
+			UI:Render()
+		end)
+	end)
 	self.list = list
 
 	local empty = W:Text(list, "normal")
@@ -607,7 +618,9 @@ function UI:Layout()
 end
 
 function UI:ListWidth()
-	return (self.list:GetWidth() or 400) - SCROLL_W - 2
+	local w = self.list:GetWidth()
+	if not w or w <= 0 then w = 400 end  -- not laid out yet; OnSizeChanged recomputes
+	return w - SCROLL_W - 2
 end
 
 function UI:VisibleRows()
@@ -629,6 +642,7 @@ end
 function UI:ComputeColumns()
 	local cols = R.Columns:Visible()
 	local width = self:ListWidth()
+	self.colListW = self.list:GetWidth()
 	local fixed, flexCol = 0, nil
 	for _, col in ipairs(cols) do
 		-- A flex column fills the leftover space until the user drags it to a width.
@@ -1680,7 +1694,7 @@ function UI:Render()
 			if char.containers[bag] then cached = true; break end
 		end
 		if self.view == "guild" and not cached then
-			text = R.L.emptyGuild
+			text = (char == NO_GUILD and NO_GUILD.name == R.L.noGuild) and R.L.notInGuild or R.L.emptyGuild
 		elseif self.view == "bank" and not cached then
 			text = R.L.emptyBank
 		elseif self.search ~= "" or self.category ~= "all" or self.bagFilter then

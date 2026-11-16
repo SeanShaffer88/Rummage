@@ -191,7 +191,7 @@ R.L = {
 	emptyGuild = "No guild bank data yet. Visit your guild bank on this character.",
 	cachedDropBank = "Cached bank: visit a banker to move items into it.",
 	cachedDropGuild = "Cached guild bank: open the guild vault to move items into it.",
-	noGuild = "No guild", cachedGuild = "Cached guild bank",
+	noGuild = "No guild", notInGuild = "You're not in a guild.", cachedGuild = "Cached guild bank",
 	nothingMatches = "Nothing matches.", empty = "Empty.",
 	mmFree = "%d / %d bag slots free",
 	mmBags = "Left-click: bags", mmBank = "Shift/middle-click: bank", mmGuild = "Ctrl-click: guild bank", mmSettings = "Right-click: settings",
