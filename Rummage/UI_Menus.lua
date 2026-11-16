@@ -197,9 +197,57 @@ function UI:ShowCharMenu(anchor)
 	W:Menu(anchor, items)
 end
 
+---------------------------------------------------------------------------
+-- Drag an item onto a category (1.10.0)
+---------------------------------------------------------------------------
+local function CursorItem()
+	if not GetCursorInfo then return nil end
+	local kind, itemID, link = GetCursorInfo()
+	if kind ~= "item" then return nil end
+	itemID = tonumber(itemID) or (link and R.ItemID(link))
+	return itemID, link
+end
+
+local function ItemLabel(itemID, link)
+	if link then return link end
+	local name = API.GetItemInfo and API.GetItemInfo(itemID)
+	return name or ("item " .. itemID)
+end
+
+-- Item on the cursor dropped on a sidebar category: custom categories keep it.
+-- The item itself goes back where it came from.
+function UI:DropOnCategory(cat)
+	local itemID, link = CursorItem()
+	if not itemID then return false end
+	ClearCursor()
+	if not (cat and cat.custom) then R:Print(R.L.dropOnCustom); return true end
+	local def = R.db.categories[cat.custom]
+	local res = R.Categories:AddItem(cat.custom, itemID)
+	local label = ItemLabel(itemID, link)
+	if res == "added" then R:Print(R.L.catAdded:format(label, def.name))
+	elseif res == "already" then R:Print(R.L.catAlready:format(label, def.name))
+	elseif res == "full" then R:Print(R.L.catFull:format(def.name, R.Categories.MAX_ITEMS)) end
+	return true
+end
+
+-- Item dropped on "+": a new category holding that item (named in the prompt).
+function UI:DropOnNewCategory()
+	local itemID, link = CursorItem()
+	if not itemID then return false end
+	ClearCursor()
+	self:PromptNewCategory(itemID, link)
+	return true
+end
+
 function UI:ShowCategoryMenu(anchor, cat)
 	local idx = cat.custom
-	W:Menu(anchor, {
+	local def = R.db.categories[idx]
+	local added = {}
+	if def and def.items then
+		for id in pairs(def.items) do added[#added + 1] = id end
+		tsort(added)
+	end
+	local items = {
 		{ text = cat.name, isTitle = true },
 		{ text = "Edit filter...", func = function() R.popupUI = UI; StaticPopup_Show("RUMMAGE_EDIT_CATEGORY", cat.name, nil, idx) end },
 		{ text = "Rename...", func = function() R.popupUI = UI; StaticPopup_Show("RUMMAGE_RENAME_CATEGORY", cat.name, nil, idx) end },
@@ -214,11 +262,26 @@ function UI:ShowCategoryMenu(anchor, cat)
 			if UI.category == cat.id then UI:SetCategory("all") end
 			R:RequestRefresh()
 		end },
-	}, "TOPLEFT", "TOPRIGHT", 2, 0)
+	}
+	if #added > 0 then
+		items[#items + 1] = { text = "Added items (click to remove)", isTitle = true }
+		local shown = min(#added, 12)
+		for i = 1, shown do
+			local id = added[i]
+			items[#items + 1] = { text = ItemLabel(id), func = function() R.Categories:RemoveItem(idx, id) end }
+		end
+		if #added > shown then items[#items + 1] = { text = "|cff888888... and " .. (#added - shown) .. " more|r", isTitle = true } end
+		items[#items + 1] = { text = "Remove all added items", func = function() R.Categories:ClearItems(idx) end }
+	end
+	W:Menu(anchor, items, "TOPLEFT", "TOPRIGHT", 2, 0)
 end
 
-function UI:PromptNewCategory()
-	R.popupUI = UI; StaticPopup_Show("RUMMAGE_NEW_CATEGORY")
+-- itemID (optional): the new category starts with that item and no filter.
+function UI:PromptNewCategory(itemID, link)
+	R.popupUI = UI
+	R.pendingCategoryItem = itemID
+	local holds = itemID and ItemLabel(itemID, link) or ((UI.search or "") ~= "" and ("items matching " .. UI.search) or "every item")
+	StaticPopup_Show("RUMMAGE_NEW_CATEGORY", holds)
 end
 
 local function EditBoxOf(dialog)
@@ -228,7 +291,7 @@ end
 function UI:RegisterPopups()
 	local function CUR() return R.popupUI or UI end
 	StaticPopupDialogs["RUMMAGE_NEW_CATEGORY"] = {
-		text = "Name for the new category?\n(Its filter will be the current search: \"%s\")",
+		text = "Name for the new category?\n(It will hold: %s)",
 		button1 = ACCEPT, button2 = CANCEL, hasEditBox = true, maxLetters = 40,
 		OnShow = function(self)
 			local eb = EditBoxOf(self)
@@ -237,8 +300,10 @@ function UI:RegisterPopups()
 		OnAccept = function(self)
 			local eb = EditBoxOf(self)
 			local name = eb and eb:GetText() or ""
+			local itemID = R.pendingCategoryItem
+			R.pendingCategoryItem = nil
 			if name ~= "" then
-				local idx = R.Categories:AddCustom(name, CUR().search)
+				local idx = itemID and R.Categories:AddCustom(name, "", nil, itemID) or R.Categories:AddCustom(name, CUR().search)
 				CUR():SetCategory("custom" .. idx)
 				R:RequestRefresh()
 			end

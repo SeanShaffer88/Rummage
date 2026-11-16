@@ -1179,3 +1179,167 @@ test("name column fills the window once the list's real width is known", functio
   UI.list:SetWidth(900); env.__settle(2)
   assert(UI.colVersion == v, "no recompute for an unchanged width")
 end)
+
+---------------------------------------------------------------------------
+-- 1.10.0: drag items onto categories, search grouping and quotes, #usable, #upgrade
+---------------------------------------------------------------------------
+local function entryFor(env, R, bag, slot, id, def)
+  local link = env.__addItem(bag, slot, id, 1, def)
+  local e = { link = link, id = id, count = 1, bag = bag, slot = slot, slots = {}, vals = {} }
+  R.Items:Prepare(e, R.Data.me, true, true)
+  return e
+end
+
+test("search: parentheses, ! on groups, quoted phrases; old syntax unchanged", function()
+  local env, R = boot()
+  local S = R.Search
+  local cloth = entryFor(env, R, 0, 1, 501, { name = "Bolt of Linen Cloth", quality = 1, ilvl = 5, type = "Trade Goods", sub = "Cloth" })
+  local band = entryFor(env, R, 0, 2, 502, { name = "Linen Bandage", quality = 1, ilvl = 8, type = "Consumable", sub = "Bandage" })
+  local helm = entryFor(env, R, 0, 3, 503, { name = "Helm of the Bear", quality = 3, ilvl = 25, type = "Armor", sub = "Mail", equip = "INVTYPE_HEAD", class = 4, subclass = 3 })
+  local blade = entryFor(env, R, 0, 4, 504, { name = "Epic Blade", quality = 4, ilvl = 15, type = "Weapon", sub = "Swords", equip = "INVTYPE_WEAPON", class = 2 })
+  local rag = entryFor(env, R, 0, 5, 505, { name = "q:rare rag", quality = 0, ilvl = 1 })
+  local function only(q, ...)
+    local want = {}
+    for _, e in ipairs({ ... }) do want[e] = true end
+    for _, e in ipairs({ cloth, band, helm, blade, rag }) do
+      local got = S:Matches(q, e)
+      assert(got == (want[e] or false), q .. ": " .. e.name .. " gave " .. tostring(got))
+    end
+  end
+  only('"linen cloth"', cloth)
+  only('name:"of the bear"', helm)
+  only("(q:rare | q:epic) ilvl>20", helm)
+  only("(q:rare | q:epic) ilvl>10", helm, blade)
+  only("!(linen | q:poor)", helm, blade)
+  only('!"linen cloth" linen', band)
+  only('"q:rare"', rag)                       -- quoted: literal text, not a field
+  only("q:rare ilvl>20 | #junk", helm, rag)   -- unchanged OR-of-ANDs
+  only("linen & cloth", cloth)
+  only("(q:epic", blade)                      -- unclosed group closes at the end
+  only("q:epic )", blade)                     -- stray ")" ignored
+  only("((linen))", cloth, band)
+end)
+
+local function tipEnv(e)
+  local orig = e.CreateFrame
+  e.__red = {}
+  e.CreateFrame = function(kind, name, ...)
+    local f = orig(kind, name, ...)
+    if name == "RummageUsableScanTooltip" then
+      e.__tipScans = 0
+      f.SetHyperlink = function(self, link) self.__id = tonumber(tostring(link):match("item:(%d+)")); e.__tipScans = e.__tipScans + 1 end
+      f.NumLines = function() return 2 end
+      e.RummageUsableScanTooltipTextLeft2 = {
+        IsShown = function() return true end,
+        GetText = function() return "Mail" end,
+        GetTextColor = function() if e.__red[f.__id] then return 1, 0.12, 0.12 end return 1, 1, 1 end,
+      }
+    end
+    return f
+  end
+end
+
+test("#usable checks proficiency through the tooltip, cached per link", function()
+  local env, R = boot(tipEnv)
+  local mail = entryFor(env, R, 0, 1, 601, { name = "Mail Helm", ilvl = 20, req = 10, equip = "INVTYPE_HEAD", class = 4, subclass = 3 })
+  local cloth = entryFor(env, R, 0, 2, 602, { name = "Cloth Cap", ilvl = 20, req = 10, equip = "INVTYPE_HEAD", class = 4, subclass = 1 })
+  local high = entryFor(env, R, 0, 3, 603, { name = "Big Helm", ilvl = 60, req = 70, equip = "INVTYPE_HEAD", class = 4, subclass = 1 })
+  env.__red[601] = true   -- "Mail" in red: can't wear mail
+  assert(not R.Search:Matches("#usable", mail), "mail is not usable")
+  assert(R.Search:Matches("#usable", cloth), "cloth is usable")
+  assert(not R.Search:Matches("#usable", high), "level 70 item above level 60")
+  local scans = env.__tipScans
+  R.Search:Matches("#usable", mail); R.Search:Matches("#usable", cloth)
+  assert(env.__tipScans == scans, "cached per link")
+  env.__red[601] = nil
+  env.__ev("SKILL_LINES_CHANGED")   -- learned mail
+  assert(R.Search:Matches("#usable", mail) and env.__tipScans > scans, "re-checked after a skill change")
+end)
+
+test("#upgrade without Pawn uses the item-level rules against equipped gear", function()
+  local env, R = boot(tipEnv)
+  env.__items[700] = { name = "Old Helm", quality = 1, ilvl = 10, equip = "INVTYPE_HEAD", class = 4, subclass = 1 }
+  env.__equipped = { [1] = "|cffffffff|Hitem:700::::::::60:::::|h[Old Helm]|h|r" }
+  local better = entryFor(env, R, 0, 1, 701, { name = "New Helm", ilvl = 20, equip = "INVTYPE_HEAD", class = 4, subclass = 1 })
+  local worse = entryFor(env, R, 0, 2, 702, { name = "Worse Helm", ilvl = 5, equip = "INVTYPE_HEAD", class = 4, subclass = 1 })
+  local mail = entryFor(env, R, 0, 3, 703, { name = "Mail Helm", ilvl = 30, equip = "INVTYPE_HEAD", class = 4, subclass = 3 })
+  local boots = entryFor(env, R, 0, 4, 704, { name = "Boots", ilvl = 3, equip = "INVTYPE_FEET", class = 4, subclass = 1 })
+  local rag = entryFor(env, R, 0, 5, 705, { name = "Rag", ilvl = 30 })
+  env.__red[703] = true
+  assert(R.Search:Matches("#upgrade", better), "higher item level")
+  assert(not R.Search:Matches("#upgrade", worse), "lower item level")
+  assert(not R.Search:Matches("#upgrade", mail), "can't wear it")
+  assert(R.Search:Matches("#upgrade", boots), "empty slot")
+  assert(not R.Search:Matches("#upgrade", rag), "not gear")
+  -- equipping something better re-evaluates
+  env.__items[706] = { name = "Great Helm", quality = 1, ilvl = 50, equip = "INVTYPE_HEAD", class = 4, subclass = 1 }
+  env.__equipped[1] = "|cffffffff|Hitem:706::::::::60:::::|h[Great Helm]|h|r"
+  env.__ev("PLAYER_EQUIPMENT_CHANGED", 1)
+  assert(not R.Search:Matches("#upgrade", better), "no longer an upgrade")
+  R.settings.upgradeIlvlFallback = false
+  assert(not R.Search:Matches("#upgrade", boots), "fallback off: Pawn only")
+end)
+
+test("drag an item onto a custom category adds it; built-ins refuse; + starts a category", function()
+  local env, R = boot()
+  open(env, R)
+  local UI = R.UI
+  local herb = entryFor(env, R, 0, 1, 801, { name = "Peacebloom", type = "Trade Goods" })
+  local ore = entryFor(env, R, 0, 2, 802, { name = "Copper Ore", type = "Trade Goods" })
+  local idx = R.Categories:AddCustom("Herbs", "")
+  local cat = R.Categories:Get("custom" .. idx)
+  assert(cat.filter(herb) and cat.filter(ore), "empty filter, no items: matches everything as before")
+  local cleared = 0
+  env.ClearCursor = function() cleared = cleared + 1 end
+  env.CursorHasItem = function() return true end
+  env.GetCursorInfo = function() return "item", 801, herb.link end
+  assert(UI:DropOnCategory(cat))
+  assert(R.db.categories[idx].items[801] and cleared == 1, "added, item returned to its slot")
+  assert(cat.filter(herb) and not cat.filter(ore), "only the added item now")
+  assert(chatHas(env, "Added"))
+  UI:DropOnCategory(cat)
+  assert(chatHas(env, "already in"))
+  -- a filter and added items together: either matches
+  R.db.categories[idx].query = "ore"
+  assert(cat.filter(herb) and cat.filter(ore))
+  -- built-in categories don't take items
+  assert(UI:DropOnCategory(R.Categories:Get("trade")))
+  assert(chatHas(env, "your own categories"))
+  -- the sidebar button reacts to a drop
+  R.Data:ScanInventory(); R:RequestRefresh(); env.__settle(4); UI.catOffset = 99; UI:UpdateSidebar()
+  local btn
+  for _, b in ipairs(UI.catButtons) do if b.cat and b.cat.id == "custom" .. idx then btn = b end end
+  assert(btn, "custom category button shown")
+  R.Categories:RemoveItem(idx, 801)
+  btn.scripts.OnReceiveDrag(btn)
+  assert(R.db.categories[idx].items[801], "OnReceiveDrag adds")
+  -- removing from the menu
+  assert(R.Categories:RemoveItem(idx, 801) and R.db.categories[idx].items == nil)
+  -- drop on "+": prompt, then a category holding just that item
+  env.GetCursorInfo = function() return "item", 802, ore.link end
+  UI.addCatBtn.scripts.OnReceiveDrag(UI.addCatBtn)
+  assert(env.__popup and env.__popup.which == "RUMMAGE_NEW_CATEGORY" and tostring(env.__popup.args[1]):find("Copper Ore", 1, true))
+  local dlg = { editBox = { GetText = function() return "Ores" end } }
+  env.StaticPopupDialogs.RUMMAGE_NEW_CATEGORY.OnAccept(dlg)
+  local n = #R.db.categories
+  assert(R.db.categories[n].name == "Ores" and R.db.categories[n].query == "" and R.db.categories[n].items[802])
+  assert(UI.category == "custom" .. n)
+  assert(not env.__errors, "errors: " .. tostring(env.__errors and env.__errors[1]))
+end)
+
+test("added category items survive sanitize and export/import", function()
+  local env, R = boot(function(e)
+    e.RummageDB = { version = 5, settings = {}, chars = {}, categories = {
+      { name = "Mine", query = "", items = { [10] = true, [11] = true, bad = true, [12] = "x", [-3] = true } },
+      { name = "Other", query = "q:rare", items = "nope" },
+    } }
+  end)
+  local c1, c2 = R.db.categories[1], R.db.categories[2]
+  assert(c1.items[10] and c1.items[11] and not c1.items.bad and not c1.items[12] and not c1.items[-3])
+  assert(c2.items == nil)
+  local str = R:ExportSettings()
+  assert(str:find("cat1.items=10,11", 1, true), str)
+  R.db.categories = {}
+  assert(R:ImportSettings(str) ~= false)
+  assert(R.db.categories[1].items[10] and R.db.categories[1].items[11] and R.db.categories[2].items == nil)
+end)

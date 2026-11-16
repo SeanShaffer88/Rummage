@@ -30,7 +30,7 @@ upgrade popup, themes for the big UI suites, profiles and export strings, offlin
 | Transfer to bank | ✓ | ✓ | – | – | – | – | – |
 | Transfer to mail / trade / vendor | **– → ✓ 1.9.0** (mail, trade) | ✓ | – | – | – | – | – |
 | Plugin API for other addons | **– → ✓ 1.9.0** | ✓ | ✓ | ✓ | ✓ | ✓ | ~ |
-| Drag an item onto a category | – | – | – | ✓ | ✓ | ✓ | – |
+| Drag an item onto a category | **– → ✓ 1.10.0** | – | – | ✓ | ✓ | ✓ | – |
 | Sort ignoring chosen slots | – | ✓ | – | – | – | ✓ | – |
 | Icon corner badges, configurable | ~ (fixed) | ✓ | ~ | ~ | ~ | ✓ | – |
 | Gamepad support | – | ✓ (Forever) | – | – | – | – | – |
@@ -49,9 +49,10 @@ upgrade popup, themes for the big UI suites, profiles and export strings, offlin
 | A5 | `Core.lua` ImportSettings | Category import stopped at the first missing index, dropping everything after it. | Walks the present indices in order. |
 | A6 | `Search.lua` | Text terms lower-cased type, subtype and slot per item per refresh. | Lower-case copies stored once in the item-info cache. |
 
-Not changed (noted only): `#upgrade` needs Pawn (the popup's item-level fallback isn't
-used by search); `#usable` checks level only, not armor/weapon proficiency; search has no
-quoted phrases or parentheses; `UI.lua` is still ~2k lines.
+Not changed in 1.9.0, all done in 1.10.0: `#upgrade` needed Pawn (now uses the popup's
+item-level rules without it); `#usable` checked level only (now also class and
+proficiency); search had no quoted phrases or parentheses (both added); `UI.lua` was ~2.4k
+lines (split into `UI_Rows.lua`, `UI_Sidebar.lua`, `UI_Footer.lua`).
 
 ## Features adapted in 1.9.0
 
@@ -81,6 +82,6 @@ quoted phrases or parentheses; `UI.lua` is still ~2k lines.
 |---|---|---|
 | Guild bank view (live + cached) | Baganator, Bagnon, Sorted, ArkInventory | **Added in 1.9.0** (Guild Bank window); must be checked in game. |
 | Gamepad navigation | Baganator (Forever) | Forever ships gamepad support; builds on the 1.5.0 keyboard nav, but needs a controller to test. |
-| Drag an item onto a sidebar category to file it there | BetterBags, AdiBags, ArkInventory | Needs item-list categories alongside the query-based ones. |
+| Drag an item onto a sidebar category to file it there | BetterBags, AdiBags, ArkInventory | **Added in 1.10.0.** |
 | Ignore chosen slots in sort | Baganator, ArkInventory | Only matters for the Blizzard sort button; Rummage's list is always sorted. |
 | Configurable icon-corner badges in grid view | Baganator | Cosmetic; grid view is secondary to the list. |

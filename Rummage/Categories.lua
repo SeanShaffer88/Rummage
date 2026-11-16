@@ -54,7 +54,16 @@ local function CustomObject(def, i)
 	local o = customObjs[def]
 	if not o then
 		local Search = R.Search
-		o = { filter = function(e) return Search:Matches(def.query, e) end }
+		-- items added by dragging (1.10.0) always belong; a category with only added
+		-- items and no filter holds just those (an empty filter otherwise matches all)
+		o = { filter = function(e)
+			local items = def.items
+			if items then
+				if e.id and items[e.id] then return true end
+				if def.query == "" and next(items) then return false end
+			end
+			return Search:Matches(def.query, e)
+		end }
 		customObjs[def] = o
 	end
 	local id = customIds[i]
@@ -121,9 +130,48 @@ function Categories:GroupOf(e)
 	return "misc", #self.groupOrder, byId.misc.name
 end
 
-function Categories:AddCustom(name, query, icon)
+function Categories:AddCustom(name, query, icon, itemID)
 	table.insert(R.db.categories, { name = name, query = query or "", icon = icon })
-	return #R.db.categories
+	local idx = #R.db.categories
+	if itemID then self:AddItem(idx, itemID) end
+	return idx
+end
+
+-- Items added to a custom category by dragging (1.10.0): def.items = { [itemID] = true }.
+Categories.MAX_ITEMS = 500
+
+function Categories:ItemCount(idx)
+	local def = R.db.categories[idx]
+	local n = 0
+	if def and def.items then for _ in pairs(def.items) do n = n + 1 end end
+	return n
+end
+
+-- Returns "added", "already", "full" or nil (no such category / bad item).
+function Categories:AddItem(idx, itemID)
+	local def = R.db.categories[idx]
+	itemID = tonumber(itemID)
+	if not def or not itemID or itemID <= 0 then return nil end
+	def.items = def.items or {}
+	if def.items[itemID] then return "already" end
+	if self:ItemCount(idx) >= self.MAX_ITEMS then return "full" end
+	def.items[itemID] = true
+	R:RequestRefresh()
+	return "added"
+end
+
+function Categories:RemoveItem(idx, itemID)
+	local def = R.db.categories[idx]
+	if not (def and def.items and def.items[itemID]) then return false end
+	def.items[itemID] = nil
+	if not next(def.items) then def.items = nil end
+	R:RequestRefresh()
+	return true
+end
+
+function Categories:ClearItems(idx)
+	local def = R.db.categories[idx]
+	if def then def.items = nil; R:RequestRefresh() end
 end
 
 function Categories:RemoveCustom(idx)

@@ -122,13 +122,14 @@ local function PlayerArmorType()
 end
 
 -- Returns isUpgrade, targetSlot, detailText (nil, "retry" when item data isn't loaded yet).
-function U:Evaluate(link, bag, slot)
+-- `usable` (optional) skips the bag-slot tooltip scan when the caller already knows.
+function U:Evaluate(link, bag, slot, usable)
 	local inf = R.Items:Info(link)
 	if not inf then return nil, "retry" end
 	if not inf.equippable or (inf.class ~= 2 and inf.class ~= 4) then return false end
 	local slots = SLOTS[inf.equipLoc]
 	if not slots then return false end
-	if not UsableNow(bag, slot) then return false end
+	if usable == false or (usable == nil and not UsableNow(bag, slot)) then return false end
 	if inf.class == 4 and not NO_ARMOR_TYPE[inf.equipLoc] and inf.subclass and inf.subclass >= 1 and inf.subclass <= 4 then
 		local armor = PlayerArmorType()
 		if armor > 0 and inf.subclass < armor then return false end
@@ -165,6 +166,32 @@ function U:Evaluate(link, bag, slot)
 		return true, target, format("Item level %d → |cff40ff40%d|r", targetIlvl, inf.ilvl)
 	end
 	return false
+end
+
+-- #upgrade (1.10.0): Pawn when installed, otherwise the popup's item-level rules
+-- (needs "Judge by item level without Pawn"). Compared against what you are wearing.
+-- Results are cached per link until your gear, level or skills change.
+local upCache, upCount = {}, 0
+function U:EntryIsUpgrade(e)
+	local inf = e and e.info
+	if not (inf and inf.equippable) then return false end
+	if R.Integrations:PawnAvailable() then return R.Integrations:PawnUpgrade(e) ~= nil end
+	if not R.settings.upgradeIlvlFallback then return false end
+	local v = upCache[e.link]
+	if v == nil then
+		local ok, up = pcall(self.Evaluate, self, e.link, nil, nil, R.Items:Usable(e))
+		if not ok or up == nil then return false end
+		v = up and true or false
+		if upCount >= 2000 then wipe(upCache); upCount = 0 end
+		upCache[e.link] = v
+		upCount = upCount + 1
+	end
+	return v
+end
+
+function U:ResetEntryCache() wipe(upCache); upCount = 0 end
+for _, ev in ipairs({ "PLAYER_EQUIPMENT_CHANGED", "PLAYER_LEVEL_UP", "SKILL_LINES_CHANGED", "CHARACTER_POINTS_CHANGED" }) do
+	R:RegisterEvent(ev, function() U:ResetEntryCache() end)
 end
 
 -- Finds a live bag slot holding this link (or itemID).

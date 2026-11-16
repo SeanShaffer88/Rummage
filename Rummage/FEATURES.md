@@ -25,7 +25,8 @@ Rummage is by Malikor, GPLv3 or later.
   Consumables, Trade Goods, Recipes, Quest Items, Bags & Ammo,
   Keys, Miscellaneous, Junk — with live counts, plus sub-filter
   chips per category (e.g. Cloth / Leather / Herb).
-- **Custom categories** built from search queries.
+- **Custom categories** built from search queries, or by **dragging items
+  onto them** (1.10.0); drop an item on **+** to start one.
 - Click a bag icon to show only that bag. The last selected
   category is remembered, even across sessions.
 - The search box remembers your **last 10 searches** (1.3.0).
@@ -51,13 +52,15 @@ Rummage is by Malikor, GPLv3 or later.
 | `#fav #new #junk #upgrade #boe #bop #bound #gear #consumable #quest #trade #recipe #key #usable #set` | keywords (plus any a plugin adds) |
 | `a b` / `a & b` | AND |
 | `a \| b` | OR |
-| `!term` | NOT |
+| `!term`, `!(a \| b)` | NOT |
+| `(a \| b) c` | grouping (1.10.0) |
+| `"linen cloth"`, `name:"of the bear"` | quoted text keeps its spaces (1.10.0) |
 
 ## Items
 
 - **Favorites** with 8 raid-marker icons (star column, or Alt+click).
 - New-item highlighting and a "time since acquired" column.
-- Required-level tint for gear you can't use yet; quest-starter
+- Tint for items you can't use (level, class, proficiency; 1.10.0); quest-starter
   badges; cooldown swipes and locked-item dimming.
 
 ## Upgrade popup
