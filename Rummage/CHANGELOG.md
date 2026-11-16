@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.9.2 — 2026-11-16
+
+Fixes from in-game screenshots of 1.9.1. Passes the offline suite (50 cases); not yet run in game.
+
+- **Name column fills the window again.** Columns were measured right after the list was re-anchored, before its new width applied, so Name stayed at its 80px minimum ("Patchwork…") and the space to the right was left empty. Columns are now recomputed once the list's real width is known.
+- **Settings labels stay inside their column.** "Guild vault (opens Guild Bank window)" ran past the panel edge; the auto-open entries are now *Banker* and *Guild vault*, with the detail in their tooltips, and long checkbox labels are clipped.
+- **Guild Bank without a guild** says "You're not in a guild." instead of asking you to visit your guild bank.
+
 ## 1.9.1 — 2026-11-16
 
 Fixes from the first in-game look at 1.9.0 on Forever 1.60.1.70938 (`/rum apicheck`: every guild bank API is present). Passes the offline suite (49 cases); the changes themselves are not yet run in game.

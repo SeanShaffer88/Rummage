@@ -355,6 +355,9 @@ function W:Check(parent, label, get, set, tip)
 	mark:SetSize(18, 18)
 	local text = W:Text(f, "normal")
 	text:SetPoint("LEFT", box, "RIGHT", 6, 0)
+	text:SetPoint("RIGHT", f, "RIGHT", 0, 0)  -- clip long labels to the column instead of overflowing
+	text:SetJustifyH("LEFT")
+	if text.SetWordWrap then text:SetWordWrap(false) end
 	text:SetText(label)
 	function f:Update() mark:SetShown(get() and true or false) end
 	f:SetScript("OnClick", function(self) set(not get()); self:Update() end)
