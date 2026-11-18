@@ -6,7 +6,7 @@
 
 Rummage puts every item you own into one sortable table: full item names, item level, required level, type, vendor value, auction prices, Pawn upgrades and more. Filter by category in one click, search with a real query language, browse any character's bags and bank from anywhere, and sell junk in one click. It combines the feature sets of Sorted and all of its plugins (Scrap, Auctionator, TradeSkillMaster, Pawn, Pawn Reloaded, Can I Mog It?) in a single addon, plus Baganator/Syndicator-style cross-character tracking.
 
-**Docs:** [Features](FEATURES.md) · [Description](DESCRIPTION.md) · [Changelog](CHANGELOG.md)
+**Docs:** [Features](FEATURES.md) · [Description](DESCRIPTION.md) · [Changelog](CHANGELOG.md) · [Screenshots](../README.md#screenshots)
 
 ## Features
 
