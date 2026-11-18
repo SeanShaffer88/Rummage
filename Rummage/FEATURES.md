@@ -1,10 +1,10 @@
 # Rummage — Features
 
-The full feature list for Rummage 1.9.0 for WoW Forever
+The full feature list for Rummage 1.11.0 for WoW Forever
 (Interface 16001). For the short version see `README.md`; for
 store-listing copy see `DESCRIPTION.md`.
 
-Prepared 2026-10-24 from the shipped 1.3.0 README and CHANGELOG.
+Updated 2026-11-18 from the shipped 1.10.1 code and current documentation.
 Rummage is by Malikor, GPLv3 or later.
 
 ## The window
@@ -26,7 +26,10 @@ Rummage is by Malikor, GPLv3 or later.
   Keys, Miscellaneous, Junk — with live counts, plus sub-filter
   chips per category (e.g. Cloth / Leather / Herb).
 - **Custom categories** built from search queries, or by **dragging items
-  onto them** (1.10.0); drop an item on **+** to start one.
+  onto them** (1.10.0); drop an item on **+** to start one. Give
+  categories the same section name to group them.
+- Set the category rail to one, two or three columns and place it left,
+  right or automatically on the outer edge of docked windows.
 - Click a bag icon to show only that bag. The last selected
   category is remembered, even across sessions.
 - The search box remembers your **last 10 searches** (1.3.0).
@@ -101,6 +104,12 @@ Rummage is by Malikor, GPLv3 or later.
   and filters) between bags and bank. **Empty a bag** by
   right-clicking its icon. Drop the cursor item onto empty list
   space to put it in a free slot. Low-bag-space warning.
+
+## Extra utilities
+
+- `/rum pet` summons a random battle pet; `/rum pet favorite` limits the
+  choice to favorites.
+- `/rum mount` uses the client's random favorite mount.
 
 ## Blizzard integration
 
@@ -209,6 +218,5 @@ upgrade popup stat diff, secret-value-safe tooltip reads, `/rum apicheck`.
 `/rum apicheck` · `/rum inventory [csv|text]` · `/rum autoprofile` ·
 `/rum savesearch` · `/rum junklog` · `/rum buyback [n]` · `/rum reset`. Diagnostics: `/fdebug` overlay and `/fdebug report`.
 
-**Status note:** 1.3.0 is built but not yet verified in game;
-1.2.1 is the version verified live (Forever beta build
-1.60.1.70450, compatibility pass — behavior unchanged from 1.2.0).
+**Status note:** 1.11.0 passes the 59-case offline suite. The new
+summon commands and category layout have not yet been verified in game.

@@ -22,7 +22,8 @@ Rummage puts every item you own into one sortable table: full item names, item l
 **Finding things**
 - Category sidebar: All, Favorites, New, Equipment, Consumables, Trade Goods, Recipes, Quest Items, Bags & Ammo, Keys, Miscellaneous, Junk — with live counts
 - Sub-filter chips per category (e.g. Cloth / Leather / Herb)
-- **Custom categories** built from search queries (sidebar "+", or the Categories settings tab)
+- **Custom categories** built from search queries or item drops; name a section to group related categories
+- Configure one to three category columns and place the rail left, right or automatically on the outer edge
 - Click a bag icon to show only that bag
 - Optionally remembers the last selected category, even across sessions
 - The search box remembers your **last 10 searches** (arrow button at its right end)
@@ -117,7 +118,7 @@ Rummage puts every item you own into one sortable table: full item names, item l
 
 ## Commands
 
-`/rum` toggle bags · `/rum bank` · `/rum search <text>` · `/rum config` · `/rum restack` · `/rum sell` · `/rum conflicts` · `/rum keys` · `/rum upgrade` (preview popup) · `/rum export` · `/rum import <string>` · `/rum apicheck` (which APIs this client has) · `/rum inventory [csv|text]` (copy every character's items) · `/rum autoprofile` (profile by spec/zone) · `/rum savesearch` · `/rum junklog` · `/rum buyback [n]` · `/rum reset`
+`/rum` toggle bags · `/rum bank` · `/rum search <text>` · `/rum pet [favorite]` · `/rum mount` · `/rum config` · `/rum restack` · `/rum sell` · `/rum conflicts` · `/rum keys` · `/rum upgrade` (preview popup) · `/rum export` · `/rum import <string>` · `/rum apicheck` (which APIs this client has) · `/rum inventory [csv|text]` (copy every character's items) · `/rum autoprofile` (profile by spec/zone) · `/rum savesearch` · `/rum junklog` · `/rum buyback [n]` · `/rum reset`
 
 Diagnostics: `/fdebug` (or `/rum debug`) toggles an overlay with memory, frame time, event rates and timings · `/fdebug report` · `/fdebug reset`. See `AUDIT.md` for the performance report.
 

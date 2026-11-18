@@ -69,6 +69,8 @@ local function CustomObject(def, i)
 	local id = customIds[i]
 	if not id then id = "custom" .. i; customIds[i] = id end
 	o.id, o.name, o.custom = id, def.name, i
+	local section = type(def.section) == "string" and def.section:match("^%s*(.-)%s*$") or ""
+	o.section = section ~= "" and section:sub(1, 32) or "Custom"
 	o.icon = def.icon or DEFAULT_CUSTOM_ICON
 	return o
 end
@@ -130,8 +132,10 @@ function Categories:GroupOf(e)
 	return "misc", #self.groupOrder, byId.misc.name
 end
 
-function Categories:AddCustom(name, query, icon, itemID)
-	table.insert(R.db.categories, { name = name, query = query or "", icon = icon })
+function Categories:AddCustom(name, query, icon, itemID, section)
+	section = type(section) == "string" and section:match("^%s*(.-)%s*$") or "Custom"
+	if section == "" then section = "Custom" end
+	table.insert(R.db.categories, { name = name, query = query or "", icon = icon, section = section:sub(1, 32) })
 	local idx = #R.db.categories
 	if itemID then self:AddItem(idx, itemID) end
 	return idx

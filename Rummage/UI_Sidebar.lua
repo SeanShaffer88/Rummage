@@ -41,7 +41,7 @@ function UI:UpdateSavedSearches(compact)
 		end
 		b.index, b.query = i, q
 		-- icon rail: numbered stubs (the search is in the tooltip)
-		b:SetWidth((compact and SIDEBAR_COMPACT_W or SIDEBAR_W) - 8)
+		b:SetWidth((self.sidebar:GetWidth() or SIDEBAR_W) - 8)
 		b:SetLabel(compact and ("|cffd9a441*|r" .. i) or ("|cffd9a441*|r " .. q))
 		b:ClearAllPoints()
 		b:SetPoint("BOTTOM", self.sidebar, "BOTTOM", 0, 26 + (#saved - i) * 20)
@@ -62,6 +62,30 @@ function UI:SaveCurrentSearch()
 	return true
 end
 
+local function SidebarRows(cats)
+	local rows, groups, bySection = {}, {}, {}
+	for _, cat in ipairs(cats) do
+		if cat.custom then
+			local section = cat.section or "Custom"
+			local key = section:lower()
+			local group = bySection[key]
+			if not group then
+				group = { name = section, cats = {} }
+				bySection[key] = group
+				groups[#groups + 1] = group
+			end
+			group.cats[#group.cats + 1] = cat
+		else
+			rows[#rows + 1] = { cat = cat }
+		end
+	end
+	for _, group in ipairs(groups) do
+		rows[#rows + 1] = { section = group.name }
+		for _, cat in ipairs(group.cats) do rows[#rows + 1] = { cat = cat } end
+	end
+	return rows
+end
+
 function UI:UpdateSidebar()
 	if not R.settings.showSidebar then return end
 	local compact = R.settings.compactSidebar
@@ -73,19 +97,47 @@ function UI:UpdateSidebar()
 		end
 		cats = filtered
 	end
-	for _, b in ipairs(self.catButtons) do b:Hide() end
+	for _, b in pairs(self.catButtons) do b:Hide() end
+	self.catHeaderButtons = self.catHeaderButtons or {}
+	for _, b in pairs(self.catHeaderButtons) do b:Hide() end
 	local width = compact and SIDEBAR_COMPACT_W or SIDEBAR_W
 	local bh = compact and 34 or 22
 	local savedH = self:UpdateSavedSearches(compact)
 	local avail = (self.sidebar:GetHeight() or 300) - 30 - savedH
 	local outer = self:RailSide()
-	local maxVisible = math.max(1, math.floor(avail / bh))
-	local maxOff = math.max(0, #cats - maxVisible)
+	local columns = math.max(1, math.min(3, math.floor(tonumber(R.settings.categoryColumns) or 1)))
+	local maxPerColumn = math.max(1, math.floor(avail / bh))
+	local maxVisible = maxPerColumn * columns
+	local rows = SidebarRows(cats)
+	local maxOff = math.max(0, #rows - maxVisible)
 	self.catOffset = math.min(self.catOffset or 0, maxOff)
 	local skin = W:Skin()
-	for i = 1, math.min(maxVisible, #cats) do
-		local c = cats[i + self.catOffset]
-		if not c then break end
+	for i = 1, math.min(maxVisible, #rows - self.catOffset) do
+		local row = rows[i + self.catOffset]
+		if not row then break end
+		local column = math.floor((i - 1) / maxPerColumn)
+		local rowIndex = (i - 1) % maxPerColumn
+		local x, y = 2 + column * width, -3 - rowIndex * bh
+		if row.section then
+			local b = self.catHeaderButtons[i]
+			if not b then
+				b = CreateFrame("Frame", nil, self.sidebar)
+				b:EnableMouse(true)
+				b.text = W:Text(b, "small")
+				b.text:SetPoint("CENTER")
+				b.text:SetJustifyH("CENTER")
+				W:SetTooltip(b, "Category section", function() return b.section end)
+				self.catHeaderButtons[i] = b
+			end
+			b.section = row.section
+			b:ClearAllPoints()
+			b:SetPoint("TOPLEFT", self.sidebar, "TOPLEFT", x, y)
+			b:SetSize(width - 4, bh - 2)
+			b.text:SetText(compact and row.section:sub(1, 1):upper() or row.section)
+			b.text:SetTextColor(skin.dim[1], skin.dim[2], skin.dim[3])
+			b:Show()
+		else
+			local c = row.cat
 		local b = self.catButtons[i]
 		if not b then
 			b = CreateFrame("Button", nil, self.sidebar)
@@ -141,7 +193,7 @@ function UI:UpdateSidebar()
 		end
 		b.cat = c
 		b:ClearAllPoints()
-		b:SetPoint("TOPLEFT", 2, -3 - (i - 1) * bh)
+			b:SetPoint("TOPLEFT", self.sidebar, "TOPLEFT", x, y)
 		b:SetWidth(width - 4)
 		b:SetHeight(bh - 2)
 		-- icon rail: a large centred icon, the count as a corner badge, the accent bar on
@@ -180,6 +232,7 @@ function UI:UpdateSidebar()
 		b.count:SetTextColor(skin.dim[1], skin.dim[2], skin.dim[3])
 		b.icon:SetDesaturated(n == 0 and not active)
 		b:Show()
+		end
 	end
 end
 

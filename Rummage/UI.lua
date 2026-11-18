@@ -524,6 +524,9 @@ end
 
 -- Re-anchors the main regions using the active theme's padding.
 function UI:RailSide()
+	local side = R.settings and R.settings.sidebarSide
+	if side == "left" then return "LEFT" end
+	if side == "right" then return "RIGHT" end
 	if self.kind == "bags" then return "LEFT" end
 	return self.railSide or "LEFT"
 end
@@ -556,7 +559,8 @@ function UI:LayoutIfChanged()
 	local w, h = self.frame:GetWidth(), self.frame:GetHeight()
 	if g.w ~= w or g.h ~= h or g.chips ~= self.chips:IsShown() or g.view ~= s.viewMode
 		or g.rh ~= s.rowHeight or g.grid ~= s.gridSize or g.side ~= s.showSidebar
-		or g.compact ~= s.compactSidebar or g.theme ~= W:Skin() or g.rail ~= self:RailSide() then
+		or g.compact ~= s.compactSidebar or g.cols ~= s.categoryColumns or g.sidePos ~= s.sidebarSide
+		or g.theme ~= W:Skin() or g.rail ~= self:RailSide() then
 		return self:Layout()
 	end
 	if g.sortKey ~= s.sortKey or g.sortAsc ~= s.sortAsc then
@@ -576,13 +580,17 @@ function UI:Layout()
 	self.geom = g
 	g.w, g.h, g.chips, g.view = self.frame:GetWidth(), self.frame:GetHeight(), self.chips:IsShown(), s.viewMode
 	g.rh, g.grid, g.side, g.compact, g.theme = s.rowHeight, s.gridSize, s.showSidebar, s.compactSidebar, W:Skin()
+	g.cols, g.sidePos = s.categoryColumns, s.sidebarSide
 	g.rail = self:RailSide()
 	g.sortKey, g.sortAsc = s.sortKey, s.sortAsc
 	self:Anchor()
 	local compact = s.compactSidebar
+	local columns = max(1, min(3, floor(tonumber(s.categoryColumns) or 1)))
+	local columnWidth = compact and SIDEBAR_COMPACT_W or SIDEBAR_W
+	local sidebarWidth = columnWidth * columns
 	self.sidebar:SetShown(s.showSidebar)
-	self.sidebar:SetWidth(compact and SIDEBAR_COMPACT_W or SIDEBAR_W)
-	self.addCatBtn:SetWidth((compact and SIDEBAR_COMPACT_W or SIDEBAR_W) - 8)
+	self.sidebar:SetWidth(sidebarWidth)
+	self.addCatBtn:SetWidth(sidebarWidth - 8)
 	self.addCatBtn:SetLabel(compact and "+" or "+ New category")
 	self.content:ClearAllPoints()
 	if s.showSidebar and self:RailSide() == "RIGHT" then
