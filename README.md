@@ -2,11 +2,22 @@
 
 ## TL;DR
 
-**List-view bag & bank replacement for WoW Forever** — by Malikor.
-Every item you own in one sortable table: full names, item level,
-vendor and auction values, Pawn upgrades. Search with a real query
-language, browse any character's bags and bank from anywhere, and
-sell junk in one click.
+**A simple way to manage your bags in WoW Forever** — by Malikor.
+Find things fast, see what items are worth, keep up with your other
+characters, and sell unwanted items with one click.
+
+## Features
+
+- Browse your bags, bank, and guild storage from one place.
+- Find items by name or words you remember.
+- Choose a clear list or picture view; sort items your way.
+- Make your own groups and arrange them as you like.
+- Check what your other characters have.
+- See what an item is worth, how strong it is, and when you found it.
+- Mark favorites and unwanted items; sell unwanted items quickly.
+- Move items between bags and storage, combine matching piles, or empty a bag.
+- Spot new finds and gear that may be better.
+- Call a random pet or favorite mount.
 
 ## Screenshots
 
