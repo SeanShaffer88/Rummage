@@ -230,6 +230,19 @@ builders.appearance = function(p)
 	st:Check("Show category sidebar", "showSidebar", nil, Relayout)
 	st:Check("Categories as icons only (names on hover)", "compactSidebar",
 		"Icon rail with item counts as badges. Bank and Guild Bank keep it on the edge away from Bags. Off: icons with names.", Relayout)
+	st:CycleButton(function() return "Category columns: " .. (S().categoryColumns or 1) end,
+		function(dir)
+			S().categoryColumns = Cycle({ 1, 2, 3 }, S().categoryColumns or 1, dir)
+			R:EachUI(function(w) w.catOffset = 0 end)
+			Relayout()
+		end, "Show one, two or three category bars.")
+	st:CycleButton(function()
+		local side = S().sidebarSide or "auto"
+		return "Category rail: " .. (side == "auto" and "Auto" or side == "left" and "Left" or "Right")
+	end, function(dir)
+		S().sidebarSide = Cycle({ "auto", "left", "right" }, S().sidebarSide or "auto", dir)
+		Relayout()
+	end, "Auto keeps bank rails on the outside when windows dock.")
 	st:Check("Hide empty categories", "hideEmptyCategories")
 
 	st:Col(1)
@@ -413,22 +426,29 @@ builders.categories = function(p)
 				r:SetPoint("TOPLEFT", 12, -34 - (i - 1) * 26)
 				r.name = W:EditBox(r, 130, 20)
 				r.name:SetPoint("LEFT")
-				r.query = W:EditBox(r, 230, 20)
+				r.query = W:EditBox(r, 170, 20)
 				r.query:SetPoint("LEFT", r.name, "RIGHT", 4, 0)
+				r.section = W:EditBox(r, 85, 20)
+				r.section:SetPoint("LEFT", r.query, "RIGHT", 4, 0)
+				W:SetTooltip(r.section, "Category section", "Use the same section name to group categories together.")
 				local function save()
 					local d = R.db.categories[r.idx]
 					if d then
 						d.name = r.name:GetText() ~= "" and r.name:GetText() or d.name
 						d.query = r.query:GetText() or ""
+						local section = (r.section:GetText() or ""):match("^%s*(.-)%s*$")
+						d.section = section ~= "" and section:sub(1, 32) or "Custom"
 						R:RequestRefresh()
 					end
 				end
 				r.name:SetScript("OnEnterPressed", function(self) save(); self:ClearFocus() end)
 				r.query:SetScript("OnEnterPressed", function(self) save(); self:ClearFocus() end)
+				r.section:SetScript("OnEnterPressed", function(self) save(); self:ClearFocus() end)
 				r.name:SetScript("OnEditFocusLost", save)
 				r.query:SetScript("OnEditFocusLost", save)
+				r.section:SetScript("OnEditFocusLost", save)
 				r.up = W:Button(r, "Up", 30, 20, function() R.Categories:MoveCustom(r.idx, -1); build(); R:RequestRefresh() end)
-				r.up:SetPoint("LEFT", r.query, "RIGHT", 4, 0)
+				r.up:SetPoint("LEFT", r.section, "RIGHT", 4, 0)
 				r.down = W:Button(r, "Dn", 30, 20, function() R.Categories:MoveCustom(r.idx, 1); build(); R:RequestRefresh() end)
 				r.down:SetPoint("LEFT", r.up, "RIGHT", 2, 0)
 				r.del = W:Button(r, "|cffff6060X|r", 22, 20, function()
@@ -440,6 +460,7 @@ builders.categories = function(p)
 			r.idx = i
 			r.name:SetText(def.name or "")
 			r.query:SetText(def.query or "")
+			r.section:SetText(def.section or "Custom")
 			r:Show()
 		end
 		add:ClearAllPoints()
@@ -456,7 +477,7 @@ builders.categories = function(p)
 	help:SetWordWrap(true)
 	help:SetJustifyH("LEFT")
 	help:SetTextColor(0.65, 0.65, 0.65)
-	help:SetText("Filters use search syntax. Examples:\n" ..
+	help:SetText("Group categories by entering the same section name. Filters use search syntax. Examples:\n" ..
 		"  #boe q>=uncommon      bind-on-equip greens and better\n" ..
 		"  type:consumable | #quest     consumables or quest items\n" ..
 		"  ilvl>=40 !#bound      unbound gear, item level 40+\n" ..

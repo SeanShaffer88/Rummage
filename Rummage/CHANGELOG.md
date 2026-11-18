@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.11.0 — 2026-11-18
+
+Offline suite: 59 cases pass; not yet verified in game.
+
+**New**
+- **Custom category sections and bar layout.** Name a section for each custom category; matching names group together. Choose one, two or three category columns and place the rail on the left, right or auto-selected outer edge.
+- **Random companion summons.** `/rum pet [favorite]` requests a random battle pet; `/rum mount` uses the client's random favorite mount.
+
 ## 1.10.1 — 2026-11-18
 
 - **Resize the Name column.** Its flexible header now exposes the same drag handle as other resizable columns; double-click resets it to fill the remaining space.

@@ -1355,7 +1355,7 @@ test("drag an item onto a custom category adds it; built-ins refuse; + starts a 
   -- the sidebar button reacts to a drop
   R.Data:ScanInventory(); R:RequestRefresh(); env.__settle(4); UI.catOffset = 99; UI:UpdateSidebar()
   local btn
-  for _, b in ipairs(UI.catButtons) do if b.cat and b.cat.id == "custom" .. idx then btn = b end end
+  for _, b in pairs(UI.catButtons) do if b.cat and b.cat.id == "custom" .. idx then btn = b end end
   assert(btn, "custom category button shown")
   R.Categories:RemoveItem(idx, 801)
   btn.scripts.OnReceiveDrag(btn)
@@ -1371,6 +1371,56 @@ test("drag an item onto a custom category adds it; built-ins refuse; + starts a 
   local n = #R.db.categories
   assert(R.db.categories[n].name == "Ores" and R.db.categories[n].query == "" and R.db.categories[n].items[802])
   assert(UI.category == "custom" .. n)
+  assert(not env.__errors, "errors: " .. tostring(env.__errors and env.__errors[1]))
+end)
+
+test("custom categories group into sections across configurable sidebar columns", function()
+  local env, R = boot()
+  open(env, R)
+  R.Categories:AddCustom("Ores", "", nil, nil, "Materials")
+  R.Categories:AddCustom("Herbs", "", nil, nil, "Materials")
+  R.Categories:AddCustom("Potions", "", nil, nil, "Consumables")
+  R:RequestRefresh()
+  env.__settle(4)
+  R.settings.categoryColumns = 2
+  R.settings.sidebarSide = "right"
+  R.UI.sidebar:SetHeight(520)
+  R.UI:Layout()
+  R.UI:UpdateSidebar()
+  assert(R.UI:RailSide() == "RIGHT", "explicit rail side")
+  assert(R.UI.sidebar:GetWidth() == 88, "two compact category bars")
+  local sections, secondColumn = {}, false
+  for _, b in pairs(R.UI.catHeaderButtons) do
+    if b:IsShown() and b.section then sections[b.section] = true end
+  end
+  for _, b in pairs(R.UI.catButtons) do
+    if b:IsShown() and b.cat and b.cat.custom then
+      local _, _, _, x = b:GetPoint(1)
+      if x and x >= 44 then secondColumn = true end
+    end
+  end
+  assert(sections.Materials and sections.Consumables,
+    "named section headers rendered")
+  assert(secondColumn, "categories flow into the next bar")
+  assert(not env.__errors, "errors: " .. tostring(env.__errors and env.__errors[1]))
+end)
+
+test("random pet and mount commands use supported collection APIs", function()
+  local env, R = boot()
+  local favoriteOnly, mount
+  env.C_PetJournal = {
+    SummonRandomPet = function(favorites) favoriteOnly = favorites end,
+  }
+  env.C_MountJournal = {
+    SummonByID = function(id) mount = id end,
+  }
+  env.SlashCmdList.RUMMAGE("pet favorite")
+  assert(favoriteOnly == true, "favorite pet mode")
+  env.SlashCmdList.RUMMAGE("pet")
+  assert(favoriteOnly == false, "all-pet mode")
+  env.SlashCmdList.RUMMAGE("mount")
+  assert(mount == 0, "uses the client random-mount entry")
+  assert(R.L.slashUsage:find("pet", 1, true) and R.L.slashUsage:find("mount", 1, true), "commands documented")
   assert(not env.__errors, "errors: " .. tostring(env.__errors and env.__errors[1]))
 end)
 

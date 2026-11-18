@@ -200,7 +200,7 @@ R.L = {
 	tabGeneral = "General", tabAppearance = "Appearance", tabItems = "Items & Junk",
 	tabColumns = "Columns", tabCategories = "Categories", tabAbout = "About",
 	preset = "Preset",
-	slashUsage = "/rum [bank | guild | search <text> | config | restack | sell | conflicts | keys | reset | upgrade (preview popup) | export | import <string> | apicheck [export] | gold | mail | perf | inventory [csv|text] | autoprofile | savesearch | junklog | buyback [n|all] | debug [report|reset]]",
+	slashUsage = "/rum [bank | guild | search <text> | pet [favorite] | mount | config | restack | sell | conflicts | keys | reset | upgrade (preview popup) | export | import <string> | apicheck [export] | gold | mail | perf | inventory [csv|text] | autoprofile | savesearch | junklog | buyback [n|all] | debug [report|reset]]",
 }
 do
 	local loc = (GetLocale and GetLocale()) or "enUS"
@@ -394,6 +394,8 @@ R.defaults = {
 	newFirst = false,
 	showSidebar = true,
 	compactSidebar = true,  -- 1.9.1: categories as an icon rail (names in tooltips)
+	categoryColumns = 1,    -- 1.11.0: category bars in the sidebar
+	sidebarSide = "auto",   -- auto | left | right
 	replaceBags = true,
 	replaceBank = true,
 	tooltipCounts = true,
@@ -451,11 +453,12 @@ end
 local CLAMP = {
 	scale = { 0.5, 2 }, alpha = { 0.1, 1 }, fontSize = { 6, 24 }, rowHeight = { 14, 40 },
 	gridSize = { 20, 64 }, width = { 400, 4000 }, height = { 300, 2400 }, lowSpaceWarn = { 0, 40 }, mailWarnDays = { 0, 28 },
-	upgradeDuration = { 0, 120 }, staleDays = { 0, 365 }, sellConfirmValue = { 0, 100000000 },
+	upgradeDuration = { 0, 120 }, staleDays = { 0, 365 }, sellConfirmValue = { 0, 100000000 }, categoryColumns = { 1, 3 },
 }
 local ENUMS = {
 	viewMode = { list = true, grid = true },
 	groupBy = { none = true, category = true, type = true, quality = true, bag = true },
+	sidebarSide = { auto = true, left = true, right = true },
 	guildDefaultTab = { current = true, all = true },
 	guildRightClick = { bags = true, cursor = true, none = true },
 }
@@ -474,6 +477,7 @@ local function SanitizeSettings(st)
 	CopyDefaults(R.defaults, st)
 	if st.upgradePoint ~= nil and not ValidPoint(st.upgradePoint) then st.upgradePoint = nil end
 	for k, r in pairs(CLAMP) do st[k] = min(r[2], max(r[1], st[k])) end
+	st.categoryColumns = floor(st.categoryColumns)
 	for k, set in pairs(ENUMS) do
 		if not set[st[k]] then st[k] = R.defaults[k] end
 	end
@@ -600,12 +604,15 @@ function R:InitDB()
 	for id, v in pairs(db.junk) do
 		if type(id) ~= "number" or type(v) ~= "boolean" then db.junk[id] = nil end
 	end
-	if type(db.categories) ~= "table" then db.categories = {} end -- { name=, query=, icon= }
+	if type(db.categories) ~= "table" then db.categories = {} end -- { name=, query=, icon=, section= }
 	local cats = {}
 	for _, c in ipairs(db.categories) do
 		if type(c) == "table" and type(c.name) == "string" then
 			if type(c.query) ~= "string" then c.query = "" end
 			if c.icon ~= nil and type(c.icon) ~= "string" and type(c.icon) ~= "number" then c.icon = nil end
+			local section = type(c.section) == "string" and c.section:match("^%s*(.-)%s*$") or ""
+			if section == "" then section = "Custom" end
+			c.section = section:sub(1, 32)
 			-- 1.10.0: items added by dragging, { [itemID] = true }
 			if type(c.items) == "table" then
 				local items, n = {}, 0

@@ -80,6 +80,11 @@ SlashCmdList.RUMMAGE = function(msg)
 	elseif cmd == "search" then
 		R.UI:Open("bags")
 		R.UI.searchBox:SetText(rest or "")
+	elseif cmd == "pet" then
+		local favorite = rest:lower():find("fav", 1, true) ~= nil
+		R.Extras:SummonRandomPet(favorite)
+	elseif cmd == "mount" then
+		R.Extras:SummonRandomMount()
 	elseif cmd == "restack" then
 		R.Mover:Restack(R.UI.view)
 	elseif cmd == "sell" then

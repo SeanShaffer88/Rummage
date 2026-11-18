@@ -44,6 +44,9 @@ local CHECKS = {
 	{ "AutoStoreGuildBankItem", false, function() return _G.AutoStoreGuildBankItem end },
 	{ "GetGuildBankMoney", false, function() return _G.GetGuildBankMoney end },
 	{ "CloseGuildBankFrame", false, function() return _G.CloseGuildBankFrame end },
+	-- 1.11.0 random companion utilities
+	{ "C_PetJournal.SummonRandomPet", false, function() return C_PetJournal and C_PetJournal.SummonRandomPet end },
+	{ "C_MountJournal.SummonByID", false, function() return C_MountJournal and C_MountJournal.SummonByID end },
 }
 
 -- Returns the result list and the count of missing REQUIRED entries.
@@ -80,6 +83,37 @@ function Extras:PrintApiCheck(export)
 		R:Print(summary)
 	end
 	return missing
+end
+
+function Extras:SummonRandomPet(favoritesOnly)
+	local journal = _G.C_PetJournal
+	if not (journal and journal.SummonRandomPet) then
+		R:Print("Random pet summon is not available on this client.")
+		return false
+	end
+	local ok, err = pcall(journal.SummonRandomPet, favoritesOnly and true or false)
+	if not ok then
+		R:Print("Random pet summon failed: " .. tostring(err))
+		return false
+	end
+	R:Print(favoritesOnly and "Requested a random favorite pet." or "Requested a random pet.")
+	return true
+end
+
+function Extras:SummonRandomMount()
+	local journal = _G.C_MountJournal
+	if not (journal and journal.SummonByID) then
+		R:Print("Random mount summon is not available on this client.")
+		return false
+	end
+	-- Forever's own random-favorite-mount button calls SummonByID(0).
+	local summoned, err = pcall(journal.SummonByID, 0)
+	if not summoned then
+		R:Print("Random mount summon failed: " .. tostring(err))
+		return false
+	end
+	R:Print("Requested a random favorite mount.")
+	return true
 end
 
 ---------------------------------------------------------------------------
