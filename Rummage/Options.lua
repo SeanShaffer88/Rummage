@@ -383,7 +383,7 @@ builders.columns = function(p)
 				r.label:SetText(label)
 				r.check:Update()
 				r.check:SetEnabled(not col.fixed)
-				r.width:SetText(col.flex and "fills" or (R.Columns:Width(col) .. "px"))
+r.width:SetText(col.flex and not cfg.widths[key] and "fills" or (R.Columns:Width(col) .. "px"))
 				r:Show()
 			end
 		end

@@ -507,10 +507,20 @@ test("columns: a dragged Name width stops flexing; reset restores flex; limits a
   local function nameW() for _, L in ipairs(R.UI.colLayout) do if L.col.key == "name" then return L.w end end end
   local flexW = nameW()
   assert(flexW and flexW >= 80, "name should flex")
-  R.settings.columns.widths.name = 150
+  local handle = R.UI.headerButtons.name.handle
+  assert(handle:IsShown(), "Name column resize handle should be visible")
+  env.__cursor = 100
+  handle.scripts.OnMouseDown(handle, "LeftButton")
+  env.__leftMouseDown = true
+  env.__cursor = 170
+  R.UI.colhead.scripts.OnUpdate(R.UI.colhead)
+  env.__leftMouseDown = false
+  handle.scripts.OnMouseUp(handle)
+  assert(R.settings.columns.widths.name == flexW + 70, "dragging Name edge should save the width")
   R.UI:ComputeColumns()
-  assert(nameW() == 150, "explicit name width must hold, got " .. tostring(nameW()))
-  R.settings.columns.widths.name = nil
+  assert(nameW() == flexW + 70, "explicit name width must hold, got " .. tostring(nameW()))
+  handle.scripts.OnMouseDown(handle, "LeftButton")
+  assert(R.settings.columns.widths.name == nil, "double-click should restore flex")
   R.UI:ComputeColumns()
   assert(nameW() == flexW, "reset must restore flex")
   local _, R2 = boot(function(e)
@@ -518,6 +528,43 @@ test("columns: a dragged Name width stops flexing; reset restores flex; limits a
   end)
   assert(R2.settings.width == 3900 and R2.settings.height == 2300, "wide window must be allowed")
   assert(R2.settings.columns.widths.name == 1200 and R2.settings.columns.widths.ilvl == 90, "column width cap is 1200")
+end)
+
+test("right-clicking a bag item uses it when the addon falls back from Blizzard templates", function()
+  local env, R = boot()
+  env.__failItemTemplates = true
+  env.__addItem(0, 1, 777, 1, { name = "Test Potion", quality = 1 })
+  R.Data:ScanInventory()
+  open(env, R)
+  local button = R.UI.holders[0] and R.UI.holders[0].buttons[1]
+  assert(button and button.registeredClicks[2] == "RightButtonUp", "right-click is registered")
+  button.scripts.OnClick(button, "RightButton")
+  assert(env.__used and env.__used[1][1] == 0 and env.__used[1][2] == 1, "right-click uses the bag slot")
+end)
+
+test("auto-opened bags close after leaving merchant or auction interactions", function()
+  for _, event in ipairs({ "MERCHANT_CLOSED", "AUCTION_HOUSE_CLOSED" }) do
+    local env, R = boot()
+    R.UI:Open()
+    R.UI.autoOpened = true
+    env.__ev(event)
+    env.__settle(2)
+    assert(not R.UI.frame:IsShown(), event .. " should close auto-opened bags")
+  end
+  local env, R = boot()
+  R.UI:Open()
+  env.__ev("MERCHANT_CLOSED")
+  env.__settle(2)
+  assert(R.UI.frame:IsShown(), "manually opened bags should remain open")
+
+  env, R = boot(function(e)
+    e.Enum.PlayerInteractionType = { Merchant = 1, Auctioneer = 2 }
+  end)
+  R.UI:Open()
+  R.UI.autoOpened = true
+  env.__ev("PLAYER_INTERACTION_MANAGER_FRAME_HIDE", 2)
+  env.__settle(2)
+  assert(not R.UI.frame:IsShown(), "leaving an auctioneer interaction should close auto-opened bags")
 end)
 
 test("settings window: every tab builds inside a scroll frame without errors", function()
