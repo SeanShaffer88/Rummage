@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.10.1 — 2026-11-18
+
+- **Resize the Name column.** Its flexible header now exposes the same drag handle as other resizable columns; double-click resets it to fill the remaining space.
+- **Use bag items with right-click.** Register both click buttons explicitly on the secure item buttons.
+- **Close auto-opened bags when leaving vendors or auction houses.** Handles the close events and modern interaction-manager hide event; manually opened bags stay open.
+
 ## 1.10.0 — 2026-11-16
 
 Passes the offline suite (55 cases); not yet run in game.

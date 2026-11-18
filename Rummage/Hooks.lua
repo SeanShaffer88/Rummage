@@ -67,6 +67,17 @@ function Hooks:InitBags()
 	local function toggle() Queue("toggle") end
 	local function open() Queue("open") end
 	local function close() Queue("close") end
+-- Auto-opened bags should follow the merchant / auction interaction, not stay
+-- stranded on screen after the player walks away.
+R:RegisterEvent("MERCHANT_CLOSED", close)
+R:RegisterEvent("AUCTION_HOUSE_CLOSED", close)
+local PIT = Enum and Enum.PlayerInteractionType
+local merchant, auctioneer = PIT and PIT.Merchant, PIT and PIT.Auctioneer
+if merchant or auctioneer then
+R:RegisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_HIDE", function(_, interaction)
+if interaction == merchant or interaction == auctioneer then close() end
+end)
+end
 	for _, fn in ipairs({ "ToggleBackpack", "ToggleBag", "ToggleAllBags" }) do
 		if type(_G[fn]) == "function" then hooksecurefunc(fn, toggle) end
 	end

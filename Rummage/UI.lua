@@ -777,7 +777,7 @@ function UI:UpdateHeaders()
 		local skin = W:Skin()
 		local tc = sorted and skin.accent or skin.dim
 		b.text:SetTextColor(tc[1], tc[2], tc[3])
-		b.handle:SetShown(not col.flex and col.kind ~= "icon" and col.kind ~= "fav" and col.kind ~= "junk")
+b.handle:SetShown(col.kind ~= "icon" and col.kind ~= "fav" and col.kind ~= "junk")
 		b:Show()
 	end
 end

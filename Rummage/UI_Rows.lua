@@ -86,6 +86,9 @@ function UI:GetItemButton(bag, slot)
 	end
 	btn:SetID(slot)
 	if btn.SetBagID then pcall(btn.SetBagID, btn, bag) end
+-- Some client templates register only left clicks; item use depends on the right
+-- click reaching the template's OnClick handler too.
+btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 	StripButton(btn)
 	btn:HookScript("OnEnter", function(self)
 		if self.rummageRow then UI:Highlight(self.rummageRow, true) end

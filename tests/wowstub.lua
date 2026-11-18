@@ -48,6 +48,7 @@ function WOWSTUB(opts)
     function m.GetParent(self) return self.parent end
     function m.GetChildren(self) return unpack(self.children) end
     function m.GetRegions() return end
+    function m.RegisterForClicks(self, ...) self.registeredClicks = { ... } end
     function m.SetScale(self, v) self.scaleV = v end
     function m.GetScale(self) return self.scaleV end
     function m.GetEffectiveScale(self)
@@ -150,6 +151,9 @@ function WOWSTUB(opts)
   env.__newObject = newObject
 
   function env.CreateFrame(kind, name, parent, template)
+    if env.__failItemTemplates and (template == "ContainerFrameItemButtonTemplate" or template == "BankItemButtonGenericTemplate") then
+      error("test requested item template fallback")
+    end
     local f = newObject(kind, name, parent)
     f.template = template
     if name then env[name] = f end
@@ -253,6 +257,7 @@ function WOWSTUB(opts)
   env.IsAltKeyDown = function() return false end
   env.IsControlKeyDown = function() return false end
   env.GetCursorPosition = function() return env.__cursor, 0 end
+  env.IsMouseButtonDown = function(button) return button == "LeftButton" and env.__leftMouseDown or false end
   env.GetCursorInfo = function() return nil end
   env.ClearCursor = noop
   env.CursorHasItem = function() return false end
