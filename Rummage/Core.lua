@@ -435,7 +435,16 @@ R.defaults = {
 -- SavedVariables sanitizing. The WTF file is user-editable and may come from an
 -- older or corrupted version, so every value is type-checked, clamped or dropped.
 ---------------------------------------------------------------------------
-local DB_VERSION = 5
+function R:GridCellSize()
+ return self.settings.colorblindCues and math.max(48 + math.max(0, self.settings.fontSize - 12) * 7, self.settings.gridSize) or self.settings.gridSize
+end
+function R:GridCueText(e)
+ local names = { [0] = "Poor", "Common", "Uncommon", "Rare", "Epic", "Legendary", "Artifact", "Heirloom" }
+ local quality = math.max(0, math.min(7, e.quality or 1))
+ return (e.fav and ("Favorite " .. e.fav) or "Not Favorite") .. " · " .. (e.junk and "Junk" or "Not Junk") .. " · Q" .. quality .. " " .. names[quality]
+end
+
+local DB_VERSION = 6
 
 -- Fills missing keys and replaces values whose type differs from the default.
 local function CopyDefaults(src, dst)
@@ -481,6 +490,7 @@ local function SanitizeSettings(st)
 	end
 	CopyDefaults(R.defaults, st)
 	if st.upgradePoint ~= nil and not ValidPoint(st.upgradePoint) then st.upgradePoint = nil end
+	if st.toolsPoint ~= nil and not ValidPoint(st.toolsPoint) then st.toolsPoint = nil end
 	for k, r in pairs(CLAMP) do st[k] = min(r[2], max(r[1], st[k])) end
 	st.categoryColumns = floor(st.categoryColumns)
 	for k, set in pairs(ENUMS) do
@@ -698,9 +708,20 @@ function R:InitDB()
 	end
 	db.junkLog = jl
 	if type(db.contextProfiles) ~= "table" then db.contextProfiles = {} end
+	local validContexts = {}; for _, key in ipairs(R.Extras.CONTEXT_KEYS) do validContexts[key] = true end
 	for k, v in pairs(db.contextProfiles) do
-		if type(k) ~= "string" or type(v) ~= "string" then db.contextProfiles[k] = nil end
+		if not validContexts[k] or type(v) ~= "string" or v == "" or #v > 128 then db.contextProfiles[k] = nil end
 	end
+	local keep = {}
+	local count = 0
+	for id, quantity in pairs(type(db.keepQuantities) == "table" and db.keepQuantities or {}) do
+		if FiniteNonnegative(id) and id > 0 and id <= 2147483647 and id == floor(id) and FiniteNonnegative(quantity)
+			and quantity > 0 and quantity <= 1000000 and quantity == floor(quantity) and count < 500 then
+			keep[id] = quantity; count = count + 1
+		end
+	end
+	db.keepQuantities = keep
+	R.ActionHistory:Sanitize(db)
 	-- v5 (1.9.1): categories become an icon rail for everyone once; the setting stays.
 	if (tonumber(db.version) or 0) < 5 then db.settings.compactSidebar = true end
 	db.version = DB_VERSION
@@ -738,6 +759,7 @@ function R:DeleteProfile(name)
 	for k, v in pairs(R.db.charProfiles) do
 		if v == name then R.db.charProfiles[k] = nil end
 	end
+	for key, target in pairs(R.db.contextProfiles) do if target == name then R.db.contextProfiles[key] = nil end end
 	if R.db.profileName == name then R.db.profileName = nil end
 end
 
@@ -793,7 +815,7 @@ local function FlattenInto(out, prefix, defaultsNode, settingsNode)
 end
 
 function R:ExportSettings()
-	local out = { "RUM1", "categories.present=1", "junkRules.present=1" }
+	local out = { "RUM1", "categories.present=1", "junkRules.present=1", "keepQuantities.present=1", "contextProfiles.present=1" }
 	FlattenInto(out, "", R.defaults, R.settings)
 	local cols = R.settings.columns
 	if cols then
@@ -820,6 +842,8 @@ function R:ExportSettings()
 	for i, q in ipairs(R.db.junkRules) do
 		out[#out + 1] = "rule" .. i .. "=" .. Esc(q)
 	end
+	for id, quantity in pairs(R.db.keepQuantities) do out[#out + 1] = "keep." .. id .. "=" .. quantity end
+	for key, name in pairs(R.db.contextProfiles) do out[#out + 1] = "context." .. key .. "=" .. Esc(name) end
 	return concat(out, ";")
 end
 
@@ -858,10 +882,24 @@ function R:ImportSettings(str)
 
 	local newSettings = DeepCopy(R.settings)
 	local catFields, ruleVals = {}, {}
+	local keep = vals["keepQuantities.present"] == "1" and {} or DeepCopy(R.db.keepQuantities)
+	local contexts = vals["contextProfiles.present"] == "1" and {} or DeepCopy(R.db.contextProfiles)
+	local contextKeys = {}; for _, key in ipairs(R.Extras.CONTEXT_KEYS) do contextKeys[key] = true end
 	for path, raw in pairs(vals) do
 		local catIdx, catKey = path:match("^cat(%d+)%.(%a+)$")
 		local ruleIdx = path:match("^rule(%d+)$")
-		if catIdx then
+		if path:match("^keep%.") then
+			local id, quantity = tonumber(path:match("^keep%.(%d+)$")), tonumber(raw)
+			if not FiniteNonnegative(id) or id <= 0 or id > 2147483647 or id ~= floor(id) or not FiniteNonnegative(quantity)
+				or quantity <= 0 or quantity > 1000000 or quantity ~= floor(quantity) then return false, "Invalid Keep Quantity" end
+			keep[id] = quantity
+		elseif path:match("^context%.") then
+			local key, name = path:match("^context%.(.+)$"), Unesc(raw)
+			if contextKeys[key] then
+				if name == "" or #name > 128 then return false, "Invalid Context Mapping" end
+				contexts[key] = name
+			end
+		elseif catIdx then
 			catIdx = tonumber(catIdx)
 			if catKey == "name" or catKey == "query" or catKey == "icon" or catKey == "items" or catKey == "section" then
 				catFields[catIdx] = catFields[catIdx] or {}
@@ -893,6 +931,8 @@ function R:ImportSettings(str)
 			-- unknown paths are ignored (forward compatibility)
 		end
 	end
+	local keepCount = 0; for _ in pairs(keep) do keepCount = keepCount + 1 end
+	if keepCount > 500 then return false, "Too Many Keep Quantities" end
 	SanitizeSettings(newSettings)
 
 	-- Walk the indices that are present, in order: a gap (a hand-edited string
@@ -927,6 +967,7 @@ function R:ImportSettings(str)
 	for k, v in pairs(newSettings) do R.settings[k] = v end
 	if hasCats or vals["categories.present"] == "1" then R.db.categories = newCats end
 	if next(ruleVals) or vals["junkRules.present"] == "1" then R.db.junkRules = newRules end
+	R.db.keepQuantities, R.db.contextProfiles = keep, contexts
 	R.db.profileName = nil
 	if R.Minimap and R.Minimap.Update then pcall(R.Minimap.Update, R.Minimap) end
 	if R.Options and R.Options.Rebuild then pcall(R.Options.Rebuild, R.Options) end

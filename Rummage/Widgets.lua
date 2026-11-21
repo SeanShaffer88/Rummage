@@ -258,8 +258,25 @@ end
 function W:Text(parent, font, layer)
 	local fs = parent:CreateFontString(nil, layer or "OVERLAY")
 	fs:SetFontObject(self.fonts[font or "normal"])
+	fs.rummageFontKind = font or "normal"
 	fs:SetWordWrap(false)
 	return fs
+end
+
+-- Measure intrinsic text, never the clipped display region's current width.
+function W:MeasureText(text)
+ if type(text.GetUnboundedStringWidth) == "function" then
+  local ok, width = pcall(text.GetUnboundedStringWidth, text)
+  if ok and type(width) == "number" and width == width and (width > 0 or text:GetText() == "") and width < math.huge then return width end
+ end
+ if not self.measureText then
+  self.measureText = UIParent:CreateFontString(nil, "OVERLAY")
+  self.measureText:SetWordWrap(false); self.measureText:Hide()
+ end
+ local probe = self.measureText
+ probe:SetFontObject(self.fonts[text.rummageFontKind or "normal"])
+ probe:SetText(text:GetText() or "")
+ return probe:GetStringWidth()
 end
 
 ---------------------------------------------------------------------------
@@ -316,7 +333,7 @@ function W:Button(parent, label, width, height, onClick)
 	function b:SetActive(v) self.active = v; ButtonColors(self) end
 	function b:SetDisabledLook(v) self.disabled = v; ButtonColors(self) end
 	function b:SetLabel(t) if self.text then self.text:SetText(t) end end
-	function b:FitText(pad) if self.text then self:SetWidth(self.text:GetStringWidth() + (pad or 16)) end end
+	function b:FitText(pad) if self.text then self:SetWidth(W:MeasureText(self.text) + (pad or 16)) end end
 	ButtonColors(b)
 	buttons[#buttons + 1] = b
 	return b
@@ -450,6 +467,7 @@ function W:Menu(anchor, items, point, relPoint, x, y)
 	W:Backdrop(menu, "main")
 	for _, b in ipairs(menuButtons) do b:Hide() end
 	local width, y0 = 120, -6
+	local lineHeight = math.max(18, (R.settings.fontSize or 12) + 6)
 	for i, it in ipairs(items) do
 		local b = menuButtons[i]
 		if not b then
@@ -474,6 +492,9 @@ function W:Menu(anchor, items, point, relPoint, x, y)
 			W:SetTooltip(b.del, "Delete")
 			menuButtons[i] = b
 		end
+		b:SetHeight(lineHeight)
+		b.text:SetHeight(lineHeight); b.text:SetWordWrap(false)
+		W:SetTooltip(b, it.text or "")
 		b:SetFrameLevel(menu:GetFrameLevel() + 2)
 		b.text:SetText(it.text or "")
 		b.check:SetShown(it.checked and true or false)
@@ -501,9 +522,11 @@ function W:Menu(anchor, items, point, relPoint, x, y)
 		b:SetPoint("TOPLEFT", 4, y0)
 		b:SetPoint("RIGHT", menu, "RIGHT", -4, 0)
 		b:Show()
-		width = math.max(width, b.text:GetStringWidth() + 48)
-		y0 = y0 - 18
+		width = math.max(width, W:MeasureText(b.text) + 48)
+		y0 = y0 - lineHeight
 	end
+	width = math.min(width, math.max(120, UIParent:GetWidth() - 24))
+	for _, b in ipairs(menuButtons) do b.text:SetWidth(width - 48) end
 	menu:SetSize(width, -y0 + 6)
 	menu:ClearAllPoints()
 	menu:SetPoint(point or "TOPLEFT", anchor, relPoint or "BOTTOMLEFT", x or 0, y or -2)

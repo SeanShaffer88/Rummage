@@ -239,6 +239,33 @@ local function tokenize(query)
 	return toks
 end
 
+-- Strict shape validation for destructive-rule drafts; normal search remains forgiving.
+function Search:ValidateQuery(query)
+ local tokens, pos = tokenize(query), 1
+ local expression
+ local function unary()
+  local token = tokens[pos]
+  if not token then return false end
+  if token.op == "!" then pos = pos + 1; return unary() end
+  if token.op == "(" then
+   pos = pos + 1
+   if not expression() or not tokens[pos] or tokens[pos].op ~= ")" then return false end
+   pos = pos + 1; return true
+  end
+  if token.term and token.term:find("[%w\128-\255]") then pos = pos + 1; return true end
+  return false
+ end
+ function expression()
+  if not unary() then return false end
+  while tokens[pos] and tokens[pos].op ~= ")" do
+   if tokens[pos].op == "|" then pos = pos + 1 end
+   if not unary() then return false end
+  end
+  return true
+ end
+ return expression() and tokens[pos] == nil
+end
+
 local function always() return true end
 
 -- Recursive descent:  or := and ("|" and)* ; and := unary unary* ;

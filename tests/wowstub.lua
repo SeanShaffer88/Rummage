@@ -305,7 +305,7 @@ function WOWSTUB(opts)
       local b = env.__bags[bag]; local s = b and b[slot]
       if not s then return nil end
       return { hyperlink = s.link, stackCount = s.count, iconFileID = 134400, quality = s.quality,
-        isLocked = false, itemID = s.id, isBound = false, hasNoValue = false }
+        isLocked = s.locked or false, itemID = s.id, isBound = s.bound or false, hasNoValue = s.noValue or false }
     end,
     PickupContainerItem = function(bag, slot) env.__picked = { bag, slot } end,
     SplitContainerItem = function(bag, slot, n) env.__split = { bag, slot, n } end,
@@ -313,7 +313,11 @@ function WOWSTUB(opts)
       env.__used = env.__used or {}
       env.__used[#env.__used + 1] = { bag, slot }
       local b = env.__bags[bag]
-      if env.MerchantFrame.shown and b then b[slot] = nil end  -- sold
+      if env.MerchantFrame.shown and b and b[slot] then
+        local s = b[slot]; local inf = env.__items[s.id]
+        env.__money = (env.__money or 123456) + (inf and inf.sell or 0) * s.count
+        b[slot] = nil
+      end  -- stateful vendor acknowledgement
     end,
     GetContainerItemCooldown = function() return 0, 0, 0 end,
     ContainerIDToInventoryID = function(bag) return 19 + bag end,

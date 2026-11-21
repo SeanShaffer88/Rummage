@@ -25,8 +25,16 @@ and every slash command running without a Lua error.
 What is **not** covered: real client behaviour. The stub fakes geometry for UIParent-anchored
 frames only, has no taint, no real combat lockdown on protected buttons, and no real secret
 values (tests simulate `issecretvalue`). Items marked *Unverified* in `Rummage/CHANGELOG.md`
-need a live check on Forever 1.60.1.70938.
+need separate live checks on the declared Forever target (currently 1.60.1.71037).
 
 Adding a test: append `test("name", function() local env, R = boot() ... end)` to
 `cases.lua`. `env.__combat`, `env.__cursor`, `env.__shift`, `env.__now`, `env.__bags`,
 `env.__addItem(bag, slot, id, count, def)` and `env.__settle(n)` drive the fake client.
+
+
+The 1.12.0 suite adds a stateful inventory adapter for reserve sales: splits transfer
+exact counts through a simulated cursor, placement and vendor acknowledgement,
+including delayed/rejected requests. Native Tools cases exercise preview consent,
+reserve removal, history filtering/paging/confirmed clearing, nine context callbacks,
+font sizes 6..24 and bounded responsive geometry. This remains a mock client;
+observed fixture acknowledgements are not claims about live server behavior.

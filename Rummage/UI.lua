@@ -219,19 +219,21 @@ function UI:CreateHeader()
 	arrow:SetPoint("RIGHT", -4, 0)
 	arrow:SetRotation(-math.pi / 2)
 	if self.kind == "guild" then
-		W:SetTooltip(charBtn, "Guild", "View the cached guild bank of any guild your characters visited.")
+		W:SetTooltip(charBtn, function() return charBtn.text:GetText() end, "View the cached guild bank of any guild your characters visited.")
 	else
-		W:SetTooltip(charBtn, "Character", "View the bags and bank of any of your characters.")
+		W:SetTooltip(charBtn, function() return charBtn.text:GetText() end, "View the bags and bank of any of your characters.")
 	end
 	self.charBtn = charBtn
 
 	-- tabs
 	self.tabBags = W:Button(header, R.L.bags, 56, 22, function() UI:SetView("bags") end)
 	self.tabBags:SetPoint("LEFT", charBtn, "RIGHT", 6, 0)
+	W:SetTooltip(self.tabBags, R.L.bags)
 	self.tabBank = W:Button(header, R.L.bank, 56, 22, function()
 		if UI.kind == "bags" then R.BankUI:Toggle() else UI:SetView("bank") end
 	end)
 	self.tabBank:SetPoint("LEFT", self.tabBags, "RIGHT", 2, 0)
+	if self.kind == "bank" then W:SetTooltip(self.tabBank, R.L.bank) end
 	-- One tab per window: Bags shows only "Bags", the Bank window only "Bank".
 	if self.kind == "bank" then
 		self.tabBags:Hide()
@@ -268,9 +270,11 @@ function UI:CreateHeader()
 
 	-- right-side buttons
 	local close = W:Button(header, "X", 22, 22, function() UI:Close() end)
+	self.closeBtn = close
 	close:SetPoint("RIGHT", 0, 0)
 	W:SetTooltip(close, "Close")
 	local gear = W:IconButton(header, "Interface\\Icons\\INV_Misc_Gear_01", 22, function() R.Options:Toggle() end)
+	self.gearBtn = gear
 	gear:SetPoint("RIGHT", close, "LEFT", -4, 0)
 	W:SetTooltip(gear, "Settings")
 	local viewBtn = W:Button(header, R.L.toGrid, 44, 22, function()
@@ -486,6 +490,13 @@ function UI:CreateFooter()
 	local currency = W:Text(foot, "small")
 	currency:SetPoint("LEFT", total, "RIGHT", 10, 0)
 	self.currencyText = currency
+	for _, text in ipairs({ free, cached, total, currency }) do
+		local tip = CreateFrame("Frame", nil, foot)
+		tip:SetAllPoints(text); tip:EnableMouse(true)
+		W:SetTooltip(tip, function() return text:GetText() end)
+		text.tipFrame = tip
+	end
+
 
 	-- action buttons (right to left)
 	self.btnTransfer = W:Button(foot, R.L.transfer, 70, 22, function() UI:DoTransfer() end)
@@ -522,6 +533,74 @@ function UI:ApplySkin()
 	if self.frame:IsShown() then self:Layout() end
 end
 
+-- Chrome uses the same outer window geometry; large text wraps controls instead of labels.
+function UI:ResponsiveChrome()
+ return R.settings.fontSize > 14 or self.frame:GetWidth() - W:Pad() * 2 < 620
+end
+function UI:HeaderHeight() return self.chromeHeaderHeight or HEADER_H end
+function UI:FooterHeight() return self.chromeFooterHeight or FOOTER_H end
+function UI:FitChromeButton(button, width, height)
+ button:SetSize(width, height)
+ if button.text then
+  button.text:SetWordWrap(false); button.text:SetHeight(height - 4)
+  if button ~= self.charBtn then
+   button.text:ClearAllPoints(); button.text:SetPoint("LEFT", 6, 0); button.text:SetPoint("RIGHT", -6, 0)
+   button.text:SetWidth(math.max(1, width - 12)); button.text:SetJustifyH("CENTER")
+  end
+ end
+end
+function UI:LayoutHeader()
+ local responsive = self:ResponsiveChrome()
+ local height = responsive and math.max(22, R.settings.fontSize + 8) or 22
+ local available = self.frame:GetWidth() - W:Pad() * 2
+ local tabs = self.kind == "bags" and { self.tabBags, self.tabBank, self.tabGuildToggle, self.allBtn }
+  or (self.kind == "bank" and { self.tabBank, self.allBtn } or { self.tabGuild })
+ local default = { [self.tabBags] = 56, [self.tabBank] = 56, [self.allBtn] = 30 }
+ if self.tabGuild then default[self.tabGuild] = 110 end
+ if self.tabGuildToggle then default[self.tabGuildToggle] = 50 end
+ local total = 0
+ for _, b in ipairs(tabs) do
+  local width = responsive and math.min(160, math.max(default[b], W:MeasureText(b.text) + 16)) or default[b]
+  self:FitChromeButton(b, width, height); total = total + width + 4
+ end
+ local iconSize = responsive and height or 22
+ self:FitChromeButton(self.closeBtn, iconSize, height); self.gearBtn:SetSize(iconSize, height)
+ self.viewBtn:SetLabel(R.settings.viewMode == "list" and R.L.toGrid or R.L.toList)
+ self:FitChromeButton(self.viewBtn, responsive and math.max(44, W:MeasureText(self.viewBtn.text) + 16) or 44, height)
+ self:FitChromeButton(self.presetBtn, responsive and math.max(52, W:MeasureText(self.presetBtn.text) + 16) or 52, height)
+ local splitTabs = responsive and total + 80 + iconSize * 2 + 18 > available
+ local rows = responsive and (splitTabs and 3 or 2) or 1
+ self.chromeHeaderHeight = responsive and (rows * height + (rows - 1) * 4 + W:Pad() * 2) or HEADER_H
+ self.chromeHeaderRows = rows
+ self.header:SetHeight(self:HeaderHeight() - W:Pad())
+ local characterWidth = responsive and math.min(130, math.max(60, available - (splitTabs and 0 or total) - iconSize * 2 - 18)) or 130
+ self:FitChromeButton(self.charBtn, characterWidth, height)
+ self.charBtn:ClearAllPoints(); self.charBtn:SetPoint(responsive and "TOPLEFT" or "LEFT", 0, 0)
+ self.closeBtn:ClearAllPoints(); self.closeBtn:SetPoint(responsive and "TOPRIGHT" or "RIGHT", 0, 0)
+ self.gearBtn:ClearAllPoints(); self.gearBtn:SetPoint("RIGHT", self.closeBtn, "LEFT", -4, 0)
+ local previous = self.charBtn
+ for i, b in ipairs(tabs) do
+  b:ClearAllPoints()
+  if splitTabs and i == 1 then b:SetPoint("TOPLEFT", 0, -(height + 4))
+  else b:SetPoint("LEFT", previous, "RIGHT", i == 1 and 6 or (responsive and 4 or (b == self.allBtn and 6 or 2)), 0) end
+  previous = b
+ end
+ self.viewBtn:ClearAllPoints(); self.presetBtn:ClearAllPoints(); self.searchBox:ClearAllPoints()
+ if responsive then
+  local y = -(rows - 1) * (height + 4)
+  self.viewBtn:SetPoint("TOPRIGHT", self.header, "TOPRIGHT", 0, y)
+  self.presetBtn:SetPoint("RIGHT", self.viewBtn, "LEFT", -4, 0)
+  self.searchBox:SetPoint("TOPLEFT", self.header, "TOPLEFT", 0, y)
+ else
+  self.viewBtn:SetPoint("RIGHT", self.gearBtn, "LEFT", -4, 0)
+  self.presetBtn:SetPoint("RIGHT", self.viewBtn, "LEFT", -4, 0)
+  self.searchBox:SetPoint("LEFT", previous, "RIGHT", 8, 0)
+ end
+ self.searchBox:SetPoint("RIGHT", self.presetBtn, "LEFT", -8, 0); self.searchBox:SetHeight(height)
+ self.chromeHeaderGeometry = { available = available, controlHeight = height, rows = rows,
+  tabWidth = total, searchRow = rows, searchWidth = responsive and available - self.viewBtn:GetWidth() - self.presetBtn:GetWidth() - 16 or nil }
+end
+
 -- Re-anchors the main regions using the active theme's padding.
 function UI:RailSide()
 	local side = R.settings and R.settings.sidebarSide
@@ -536,14 +615,15 @@ function UI:Anchor()
 	self.header:ClearAllPoints()
 	self.header:SetPoint("TOPLEFT", pad, -pad)
 	self.header:SetPoint("TOPRIGHT", -pad, -pad)
+	self:LayoutHeader()
 	self.sidebar:ClearAllPoints()
 	-- Bank / Guild Bank docked beside Bags keep their rail on the outer edge (railSide).
 	if self:RailSide() == "RIGHT" then
-		self.sidebar:SetPoint("TOPRIGHT", -pad, -(HEADER_H + pad - 6))
-		self.sidebar:SetPoint("BOTTOMRIGHT", -pad, FOOTER_H + pad - 6)
+		self.sidebar:SetPoint("TOPRIGHT", -pad, -(self:HeaderHeight() + pad - 6))
+		self.sidebar:SetPoint("BOTTOMRIGHT", -pad, self:FooterHeight() + pad - 6)
 	else
-		self.sidebar:SetPoint("TOPLEFT", pad, -(HEADER_H + pad - 6))
-		self.sidebar:SetPoint("BOTTOMLEFT", pad, FOOTER_H + pad - 6)
+		self.sidebar:SetPoint("TOPLEFT", pad, -(self:HeaderHeight() + pad - 6))
+		self.sidebar:SetPoint("BOTTOMLEFT", pad, self:FooterHeight() + pad - 6)
 	end
 	self.footer:ClearAllPoints()
 	self.footer:SetPoint("BOTTOMLEFT", pad + 14, pad - 2)
@@ -558,9 +638,9 @@ function UI:LayoutIfChanged()
 	if not g then g = {}; self.geom = g end
 	local w, h = self.frame:GetWidth(), self.frame:GetHeight()
 	if g.w ~= w or g.h ~= h or g.chips ~= self.chips:IsShown() or g.view ~= s.viewMode
-		or g.rh ~= s.rowHeight or g.grid ~= s.gridSize or g.side ~= s.showSidebar
+		or g.rh ~= s.rowHeight or g.grid ~= R:GridCellSize() or g.side ~= s.showSidebar
 		or g.compact ~= s.compactSidebar or g.cols ~= s.categoryColumns or g.sidePos ~= s.sidebarSide
-		or g.theme ~= W:Skin() or g.rail ~= self:RailSide() then
+		or g.theme ~= W:Skin() or g.rail ~= self:RailSide() or g.font ~= s.fontSize or g.footer ~= self:FooterHeight() then
 		return self:Layout()
 	end
 	if g.sortKey ~= s.sortKey or g.sortAsc ~= s.sortAsc then
@@ -576,12 +656,13 @@ function UI:Layout()
 	if not self.frame then return end
 	local s = R.settings
 	local pad = W:Pad()
+	self:UpdateFooter()
 	local g = self.geom or {}
 	self.geom = g
 	g.w, g.h, g.chips, g.view = self.frame:GetWidth(), self.frame:GetHeight(), self.chips:IsShown(), s.viewMode
-	g.rh, g.grid, g.side, g.compact, g.theme = s.rowHeight, s.gridSize, s.showSidebar, s.compactSidebar, W:Skin()
+	g.rh, g.grid, g.side, g.compact, g.theme = s.rowHeight, R:GridCellSize(), s.showSidebar, s.compactSidebar, W:Skin()
 	g.cols, g.sidePos = s.categoryColumns, s.sidebarSide
-	g.rail = self:RailSide()
+	g.rail, g.font, g.footer = self:RailSide(), s.fontSize, self:FooterHeight()
 	g.sortKey, g.sortAsc = s.sortKey, s.sortAsc
 	self:Anchor()
 	local compact = s.compactSidebar
@@ -594,15 +675,15 @@ function UI:Layout()
 	self.addCatBtn:SetLabel(compact and "+" or "+ New category")
 	self.content:ClearAllPoints()
 	if s.showSidebar and self:RailSide() == "RIGHT" then
-		self.content:SetPoint("TOPLEFT", pad, -(HEADER_H + pad - 6))
+		self.content:SetPoint("TOPLEFT", pad, -(self:HeaderHeight() + pad - 6))
 		self.content:SetPoint("BOTTOMRIGHT", self.sidebar, "BOTTOMLEFT", -PAD, 0)
 	else
 		if s.showSidebar then
 			self.content:SetPoint("TOPLEFT", self.sidebar, "TOPRIGHT", PAD, 0)
 		else
-			self.content:SetPoint("TOPLEFT", pad, -(HEADER_H + pad - 6))
+			self.content:SetPoint("TOPLEFT", pad, -(self:HeaderHeight() + pad - 6))
 		end
-		self.content:SetPoint("BOTTOMRIGHT", -pad, FOOTER_H + pad - 6)
+		self.content:SetPoint("BOTTOMRIGHT", -pad, self:FooterHeight() + pad - 6)
 	end
 	self.viewBtn:SetLabel(s.viewMode == "list" and R.L.toGrid or R.L.toList)
 
@@ -643,13 +724,13 @@ end
 function UI:VisibleRows()
 	local h = self.list:GetHeight() or 300
 	if R.settings.viewMode == "grid" then
-		return math.max(1, math.floor(h / (R.settings.gridSize + 2)))
+		return math.max(1, math.floor(h / (R:GridCellSize() + 2)))
 	end
 	return math.max(1, math.floor(h / self:RowHeight()))
 end
 
 function UI:GridPerRow()
-	local size = R.settings.gridSize + 2
+	local size = R:GridCellSize() + 2
 	return math.max(1, math.floor(self:ListWidth() / size))
 end
 
@@ -1098,7 +1179,7 @@ function UI:Render()
 	local pool, other = grid and self.gridRows or self.rows, grid and self.rows or self.gridRows
 	for _, r in ipairs(other) do r:Hide() end
 
-	local rh = grid and (s.gridSize + 2) or self:RowHeight()
+	local rh = grid and (R:GridCellSize() + 2) or self:RowHeight()
 	for i = 1, visible do
 		local d = display[self.offset + i]
 		local row = grid and self:GetGridRow(i) or self:GetListRow(i)
@@ -1109,7 +1190,7 @@ function UI:Render()
 				row:SetPoint("TOPLEFT", 0, -(i - 1) * rh)
 				row:SetPoint("RIGHT", self.list, "RIGHT", -SCROLL_W - 2, 0)
 			end
-			row:SetHeight(d and d.header and 20 or s.gridSize)
+			row:SetHeight(d and d.header and 20 or R:GridCellSize())
 		end
 		if not d then
 			row:Hide()

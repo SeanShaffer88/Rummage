@@ -387,6 +387,15 @@ function Extras:Init()
 	end)
 end
 
+function Extras:SetContextMapping(key, name)
+ local valid = false
+ for _, k in ipairs(self.CONTEXT_KEYS) do if k == key then valid = true end end
+ if not valid then return false, "Unknown Context" end
+ if name ~= nil and (type(name) ~= "string" or name == "" or #name > 128 or not R.db.profiles[name]) then return false, "Profile Unavailable" end
+ R.db.contextProfiles[key] = name
+ return true
+end
+
 function Extras:Command(rest)
 	local sub, a, b = (rest or ""):match("^(%S*)%s*(%S*)%s*(.-)$")
 	sub = (sub or ""):lower()
@@ -399,7 +408,8 @@ function Extras:Command(rest)
 		for _, k in ipairs(self.CONTEXT_KEYS) do if k == a then valid = true end end
 		if not valid then R:Print("Unknown context. Use: " .. table.concat(self.CONTEXT_KEYS, ", ")); return end
 		if not R.db.profiles[b] then R:Print("No profile named '" .. b .. "' (save one in settings first)."); return end
-		R.db.contextProfiles[a] = b
+		local ok, err = self:SetContextMapping(a, b)
+		if not ok then R:Print(err); return end
 		R:Print(a .. " -> '" .. b .. "'.")
 	elseif sub == "clear" and a ~= "" then
 		R.db.contextProfiles[a] = nil
