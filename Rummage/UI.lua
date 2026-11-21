@@ -165,7 +165,7 @@ function UI:Create()
 	f:SetScript("OnHide", function() UI:OnHide() end)
 	-- OnSizeChanged fires every frame while dragging the grip: coalesce to one layout per frame.
 	f:SetScript("OnSizeChanged", function()
-		if f:IsShown() then R:Defer("layout", function() UI:Layout() end) end
+		if f:IsShown() then R:Defer("layout" .. UI.suffix, function() UI:Layout() end) end
 	end)
 	table.insert(UISpecialFrames, "RummageFrame" .. suffix)
 
@@ -870,7 +870,7 @@ function UI:Refresh()
 	if self.searchAllActive then
 		entries = self:BuildAllChars(self.view)
 	else
-		entries = Items:Build(char, self.view)
+		entries = Items:Build(char, self.view, self)
 		for i = 1, #entries do Items:Prepare(entries[i], char, isMe, isLive) end
 	end
 	self.allEntries = entries

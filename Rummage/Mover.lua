@@ -12,6 +12,17 @@ R.Mover = Mover
 
 local MAX_STEPS = 400
 local LOCK_TIMEOUT = 3
+Mover.bankSession = 0
+R:RegisterEvent("BANKFRAME_OPENED", function() Mover.bankSession = Mover.bankSession + 1 end)
+R:RegisterEvent("BANKFRAME_CLOSED", function() Mover.bankSession = Mover.bankSession + 1 end)
+
+local function BankCheck(bags, sources)
+	local needsBank = false
+	for _, bag in ipairs(bags) do if API.IsBankBag(bag) then needsBank = true end end
+	for _, src in ipairs(sources or {}) do if API.IsBankBag(src[1]) then needsBank = true end end
+	local session = Mover.bankSession
+	return function() return not needsBank or (R.Data.atBank and session == Mover.bankSession) end
+end
 
 local function IsLocked(bag, slot)
 	local _, _, _, _, locked = API.GetSlotInfo(bag, slot)
@@ -25,10 +36,11 @@ function Mover:Start(planner, label, onDone)
 		R:Print("Can't move items in combat.")
 		return
 	end
-	if self:IsShown() then
+	if self:Busy() then
 		R:Print("Already moving items; please wait.")
 		return
 	end
+	if GetCursorInfo() then return R:Print("Put down the cursor item before moving items.") end
 	self.planner = planner
 	self.label = label
 	self.onDone = onDone
@@ -40,14 +52,14 @@ function Mover:Start(planner, label, onDone)
 	R:Fire("MOVER_CHANGED", true)
 end
 
-function Mover:Stop(msg)
+function Mover:Stop(msg, completed)
 	self:Hide()
 	self.planner = nil
 	if msg then R:Print(msg) end
 	if self.onDone then
 		local fn = self.onDone
 		self.onDone = nil
-		fn()
+		if completed then fn() end
 	end
 	R:Fire("MOVER_CHANGED", false)
 	R:RequestRefresh()
@@ -58,11 +70,7 @@ Mover:SetScript("OnUpdate", function(self, elapsed)
 	if self.wait > 0 then return end
 	if InCombatLockdown() then return self:Stop("Stopped: entered combat.") end
 
-	if GetCursorInfo() then
-		ClearCursor()
-		self.wait = 0.1
-		return
-	end
+	if GetCursorInfo() then return self:Stop("Stopped: cursor is occupied.") end
 
 	local last = self.last
 	if last then
@@ -75,10 +83,10 @@ Mover:SetScript("OnUpdate", function(self, elapsed)
 	self.lockTime = 0
 
 	self.steps = self.steps + 1
-	if self.steps > MAX_STEPS then return self:Stop() end
+	if self.steps > MAX_STEPS then return self:Stop("Stopped: move limit reached.") end
 
 	local move, err = self.planner()
-	if not move then return self:Stop(err) end
+	if not move then return self:Stop(err, err == nil) end
 
 	if move.amount then
 		API.SplitContainerItem(move.from[1], move.from[2], move.amount)
@@ -101,7 +109,9 @@ end
 
 -- Merge partial stacks of the same item within the given bags.
 function Mover:PlanRestack(bags)
+	local bankValid = BankCheck(bags)
 	return function()
+		if not bankValid() then return nil, "Stopped: bank session ended." end
 		local partial = {}
 		for _, bag in ipairs(bags) do
 			for slot = 1, API.GetNumSlots(bag) or 0 do
@@ -167,14 +177,21 @@ end
 
 -- Moves every given source slot into the target bags.
 function Mover:PlanTransfer(sources, targets)
+	local snapshot = {}
+	for _, src in ipairs(sources) do
+		local link, count = API.GetSlotInfo(src[1], src[2])
+		snapshot[#snapshot + 1] = { src[1], src[2], src[3] or link, src[4] or count or 1 }
+	end
+	local bankValid = BankCheck(targets, snapshot)
 	local i = 0
 	return function()
+		if not bankValid() then return nil, "Stopped: bank session ended." end
 		while true do
 			i = i + 1
-			local src = sources[i]
+			local src = snapshot[i]
 			if not src then return nil end
-			local link, count, _, _, _, id = API.GetSlotInfo(src[1], src[2])
-			if link then
+			local link, count, _, _, locked, id = API.GetSlotInfo(src[1], src[2])
+			if link and link == src[3] and (count or 1) == src[4] and not locked then
 				id = id or R.ItemID(link)
 				local dst = Mover:FindTarget(targets, link, id, count or 1)
 				if not dst then return nil, "Not enough free space." end
@@ -271,7 +288,8 @@ function Mover:SendTo(kind, entries)
 	local t = TARGETS[kind]
 	if not t or not t.open() then return end
 	if InCombatLockdown() then return R:Print("Can't move items in combat.") end
-	if self.sendTicker then return R:Print("Already moving items; please wait.") end
+	if self:Busy() then return R:Print("Already moving items; please wait.") end
+	if GetCursorInfo() then return R:Print("Put down the cursor item before moving items.") end
 	local sources = {}
 	for _, e in ipairs(entries) do
 		if not e.bound and not e.foreign then
@@ -282,14 +300,13 @@ function Mover:SendTo(kind, entries)
 	local i, placed, full = 0, 0, false
 	local function finish()
 		if self.sendTicker then self.sendTicker:Cancel(); self.sendTicker = nil end
-		if GetCursorInfo() then ClearCursor() end
 		local msg = format("Added %d item(s) to the %s.", placed, kind == "mail" and "mail" or "trade")
 		if full then msg = msg .. " It is full; the rest stayed in your bags." end
 		R:Print(msg)
 		R:Fire("MOVER_CHANGED", false)
 	end
 	local function step()
-		if not t.open() or InCombatLockdown() then return finish() end
+		if not t.open() or InCombatLockdown() or GetCursorInfo() then return finish() end
 		i = i + 1
 		local src = sources[i]
 		if not src then return finish() end
@@ -306,14 +323,26 @@ function Mover:SendTo(kind, entries)
 	step()
 end
 
--- Moves the given entries (all their slots) to the other side (bags <-> bank).
-function Mover:TransferEntries(entries, toBank)
-	if not R.Data.atBank then return R:Print("Visit a banker first.") end
-	local sources = {}
-	-- Copy the {bag, slot} values: entry tables are pooled and recycled on the next
-	-- refresh, which happens while this transfer is still running.
+-- Copy coordinates and expected source identity before an asynchronous confirmation/move.
+function Mover:SnapshotEntries(entries)
+	local copies = {}
 	for _, e in ipairs(entries) do
-		for _, s in ipairs(e.slots) do sources[#sources + 1] = { s[1], s[2] } end
+		local copy = { link = e.link, bound = e.bound, foreign = e.foreign, slots = {} }
+		for _, src in ipairs(e.slots) do
+			local _, count = API.GetSlotInfo(src[1], src[2])
+			copy.slots[#copy.slots + 1] = { src[1], src[2], src[3] or e.link, src[4] or count or 1 }
+		end
+		copies[#copies + 1] = copy
+	end
+	return copies
+end
+
+-- Moves the given entries (all their slots) to the other side (bags <-> bank).
+function Mover:TransferEntries(entries, toBank, session)
+	if not R.Data.atBank or (session and session ~= self.bankSession) then return R:Print("Visit a banker first.") end
+	local sources = {}
+	for _, e in ipairs(self:SnapshotEntries(entries)) do
+		for _, src in ipairs(e.slots) do sources[#sources + 1] = src end
 	end
 	local targets = toBank and others(API.BankBagList) or others(API.InvBagList)
 	self:Start(self:PlanTransfer(sources, targets), "transfer")

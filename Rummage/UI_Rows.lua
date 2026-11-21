@@ -591,7 +591,7 @@ end
 local function DoUpdateLive() UI:UpdateLiveNow() end
 function UI:UpdateLive()
 	if not self.frame or not self.frame:IsShown() then return end
-	R:Defer("live", DoUpdateLive)
+	R:Defer("live" .. UI.suffix, DoUpdateLive)
 end
 
 function UI:UpdateLiveNow()

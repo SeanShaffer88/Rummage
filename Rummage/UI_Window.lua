@@ -208,10 +208,7 @@ function UI:Geo()
 	b.scale = min(2, max(0.5, tonumber(b.scale) or R.settings.scale or 1))
 	if type(b.viewSizes) ~= "table" then b.viewSizes = {} end
 	local p = b.point
-	if p ~= nil and not (type(p) == "table" and type(p[1]) == "string" and type(p[2]) == "string"
-		and type(p[3]) == "number" and type(p[4]) == "number") then
-		b.point = nil
-	end
+	if p ~= nil and not R.ValidPoint(p) then b.point = nil end
 	return b
 end
 

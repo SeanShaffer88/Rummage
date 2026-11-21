@@ -104,6 +104,17 @@ local entryPool, pairPool = {}, {}
 local live = {}       -- entries handed out by the last Build (returned on next Build)
 local out = {}        -- reused result array
 local combineMap = {}
+local defaultOwner = {}
+local pools = setmetatable({}, { __mode = "k" })
+local function SelectPool(owner)
+	owner = owner or defaultOwner
+	local pool = pools[owner]
+	if not pool then
+		pool = { entries = {}, pairs = {}, live = {}, out = {}, combine = {} }
+		pools[owner] = pool
+	end
+	entryPool, pairPool, live, out, combineMap = pool.entries, pool.pairs, pool.live, pool.out, pool.combine
+end
 
 local function AcquirePair(bag, slot)
 	local p = pairPool[#pairPool]
@@ -133,8 +144,9 @@ local function AcquireEntry()
 end
 
 -- Builds entries for a character (or guild) record and a view ("bags", "bank" or "guild").
--- The returned array and its entries are only valid until the next Build call.
-function Items:Build(char, view)
+-- Entries remain valid until the next Build for the same owner (a window or scratch context).
+function Items:Build(char, view, owner)
+	SelectPool(owner)
 	ReleaseAll()
 	wipe(out)
 	local bags = (view == "guild" and API.GuildBagList) or ((view == "bank") and API.BankBagList) or API.InvBagList

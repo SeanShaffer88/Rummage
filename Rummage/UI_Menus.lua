@@ -87,7 +87,8 @@ function UI:BuildAllChars(view)
 	local Items = R.Items
 	for _, entry in ipairs(R.Data:SortedChars()) do
 		local c = entry.c
-		local built = Items:Build(c, view)
+		self.allCharsPool = self.allCharsPool or {}
+		local built = Items:Build(c, view, self.allCharsPool)
 		for i = 1, #built do
 			local e = built[i]
 			Items:Prepare(e, c, c == R.Data.me, false)
@@ -366,7 +367,7 @@ function UI:RegisterPopups()
 	StaticPopupDialogs["RUMMAGE_SELL_CONFIRM"] = {
 		text = "Sell %s junk item(s) for %s?\nThis sale includes Uncommon or better items, or is worth more than your safeguard value.",
 		button1 = YES, button2 = NO,
-		OnAccept = function() R.Junk:SellAll(true) end,
+		OnAccept = function(_, sale) R.Junk:SellAll(sale) end,
 		timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
 	}
 	StaticPopupDialogs["RUMMAGE_DELETE_CHAR"] = {
@@ -382,9 +383,8 @@ function UI:RegisterPopups()
 	StaticPopupDialogs["RUMMAGE_CONFIRM_TRANSFER"] = {
 		text = "Move EVERY listed item to your %s?",
 		button1 = YES, button2 = NO,
-		OnAccept = function()
-			CUR().transferConfirmed = true
-			CUR():DoTransfer()
+		OnAccept = function(_, transfer)
+			if transfer then R.Mover:TransferEntries(transfer.entries, transfer.toBank, transfer.session) end
 		end,
 		timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
 	}

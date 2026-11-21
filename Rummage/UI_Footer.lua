@@ -307,16 +307,17 @@ function UI:DoTransfer()
 		return R.Mover:SendTo(target, entries)
 	end
 	if not R.Data.atBank then return end
-	if self.bagFilter == nil and self.search == "" and self.category == "all" and not self.transferConfirmed then
-		R.popupUI = UI; StaticPopup_Show("RUMMAGE_CONFIRM_TRANSFER", self.view == "bank" and "bags" or "bank")
-		return
-	end
-	self.transferConfirmed = nil
 	local entries = {}
 	for _, e in ipairs(self.entries or {}) do
 		if not (API.KEYRING and e.bag == API.KEYRING) then entries[#entries + 1] = e end
 	end
-	R.Mover:TransferEntries(entries, self.view == "bags")
+	local toBank = self.view == "bags"
+	if self.bagFilter == nil and self.search == "" and self.category == "all" then
+		local transfer = { window = self, entries = R.Mover:SnapshotEntries(entries), toBank = toBank, session = R.Mover.bankSession }
+		StaticPopup_Show("RUMMAGE_CONFIRM_TRANSFER", toBank and "bank" or "bags", nil, transfer)
+		return
+	end
+	R.Mover:TransferEntries(entries, toBank)
 end
 
 end

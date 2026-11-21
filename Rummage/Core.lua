@@ -463,10 +463,15 @@ local ENUMS = {
 	guildRightClick = { bags = true, cursor = true, none = true },
 }
 
+local ANCHORS = { TOPLEFT = true, TOP = true, TOPRIGHT = true, LEFT = true, CENTER = true,
+	RIGHT = true, BOTTOMLEFT = true, BOTTOM = true, BOTTOMRIGHT = true }
 local function ValidPoint(p)
-	return type(p) == "table" and type(p[1]) == "string" and type(p[2]) == "string"
-		and type(p[3]) == "number" and type(p[4]) == "number"
+	return type(p) == "table" and ANCHORS[p[1]] and ANCHORS[p[2]]
+		and type(p[3]) == "number" and p[3] == p[3] and math.abs(p[3]) < math.huge
+		and type(p[4]) == "number" and p[4] == p[4] and math.abs(p[4]) < math.huge
 end
+
+R.ValidPoint = ValidPoint
 
 local function SanitizeSettings(st)
 	-- migration (1.1 -> 1.2): "reset category on open" became "remember category"
@@ -482,10 +487,7 @@ local function SanitizeSettings(st)
 		if not set[st[k]] then st[k] = R.defaults[k] end
 	end
 	local p = st.point
-	if p ~= nil and not (type(p) == "table" and type(p[1]) == "string" and type(p[2]) == "string"
-		and type(p[3]) == "number" and type(p[4]) == "number") then
-		st.point = nil
-	end
+	if p ~= nil and not ValidPoint(p) then st.point = nil end
 	local cols = st.columns
 	local seen, order = {}, {}
 	for _, key in ipairs(cols.order) do
@@ -513,8 +515,18 @@ local function ValidSlot(s)
 	return type(s) == "table" and type(s.l) == "string" and type(s.c) == "number"
 end
 
+local function FiniteNonnegative(v)
+	return type(v) == "number" and v == v and v >= 0 and v < math.huge
+end
+
 local function SanitizeChar(c)
 	if type(c) ~= "table" then return false end
+	for _, key in ipairs({ "name", "realm", "class", "faction" }) do
+		if type(c[key]) ~= "string" then c[key] = nil end
+	end
+	for _, key in ipairs({ "level", "lastSeen" }) do
+		if not FiniteNonnegative(c[key]) then c[key] = nil end
+	end
 	if type(c.containers) ~= "table" then c.containers = {} end
 	for bag, rec in pairs(c.containers) do
 		if type(bag) ~= "number" or type(rec) ~= "table" or type(rec.slots) ~= "table" then
@@ -534,6 +546,9 @@ local function SanitizeChar(c)
 	for _, sl in ipairs(c.mail) do if ValidSlot(sl) then mail[#mail + 1] = sl end end
 	c.mail = mail
 	if type(c.acquired) ~= "table" then c.acquired = {} end
+	for id, timestamp in pairs(c.acquired) do
+		if not FiniteNonnegative(timestamp) then c.acquired[id] = nil end
+	end
 	if type(c.money) ~= "number" then c.money = 0 end
 	if c.guildKey ~= nil and type(c.guildKey) ~= "string" then c.guildKey = nil end
 	if c.currencies ~= nil then
@@ -778,7 +793,7 @@ local function FlattenInto(out, prefix, defaultsNode, settingsNode)
 end
 
 function R:ExportSettings()
-	local out = { "RUM1" }
+	local out = { "RUM1", "categories.present=1", "junkRules.present=1" }
 	FlattenInto(out, "", R.defaults, R.settings)
 	local cols = R.settings.columns
 	if cols then
@@ -793,6 +808,7 @@ function R:ExportSettings()
 	for i, def in ipairs(R.db.categories) do
 		out[#out + 1] = "cat" .. i .. ".name=" .. Esc(def.name or "")
 		out[#out + 1] = "cat" .. i .. ".query=" .. Esc(def.query or "")
+		out[#out + 1] = "cat" .. i .. ".section=" .. Esc(def.section or "Custom")
 		if def.icon ~= nil then out[#out + 1] = "cat" .. i .. ".icon=" .. Esc(def.icon) end
 		if def.items and next(def.items) then
 			local ids = {}
@@ -847,7 +863,7 @@ function R:ImportSettings(str)
 		local ruleIdx = path:match("^rule(%d+)$")
 		if catIdx then
 			catIdx = tonumber(catIdx)
-			if catKey == "name" or catKey == "query" or catKey == "icon" or catKey == "items" then
+			if catKey == "name" or catKey == "query" or catKey == "icon" or catKey == "items" or catKey == "section" then
 				catFields[catIdx] = catFields[catIdx] or {}
 				catFields[catIdx][catKey] = Unesc(raw)
 			end
@@ -895,7 +911,9 @@ function R:ImportSettings(str)
 				id = tonumber(id)
 				if id and id > 0 and n < 500 then items = items or {}; items[id] = true; n = n + 1 end
 			end
-			newCats[#newCats + 1] = { name = f.name, query = f.query or "", icon = icon, items = items }
+			local section = (f.section or ""):match("^%s*(.-)%s*$")
+			if section == "" then section = "Custom" end
+			newCats[#newCats + 1] = { name = f.name, query = f.query or "", icon = icon, items = items, section = section:sub(1, 32) }
 		end
 	end
 	local hasCats = false
@@ -907,8 +925,8 @@ function R:ImportSettings(str)
 
 	wipe(R.settings)
 	for k, v in pairs(newSettings) do R.settings[k] = v end
-	if hasCats then R.db.categories = newCats end
-	if next(ruleVals) then R.db.junkRules = newRules end
+	if hasCats or vals["categories.present"] == "1" then R.db.categories = newCats end
+	if next(ruleVals) or vals["junkRules.present"] == "1" then R.db.junkRules = newRules end
 	R.db.profileName = nil
 	if R.Minimap and R.Minimap.Update then pcall(R.Minimap.Update, R.Minimap) end
 	if R.Options and R.Options.Rebuild then pcall(R.Options.Rebuild, R.Options) end
