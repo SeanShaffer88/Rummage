@@ -185,7 +185,7 @@ test("sanitizer repairs garbage and migrates a v3 database", function()
   assert(s.keyboardNav == true, "type repaired")
   assert(s.viewSizes.evil == nil and s.viewSizes.bags.w == 400 and s.viewSizes.bags.h == 2400 and s.viewSizes.bags.scale == 2)
   assert(#db.savedSearches == 2 and #db.junkLog == 1 and db.contextProfiles.spec1 == "P" and db.contextProfiles.raid == nil)
-  assert(db.version == 5, "version bumped")
+  assert(db.version == 6, "version bumped")
   local n = 0
   for _, k in ipairs(s.columns.order) do if k == "name" then n = n + 1 end; assert(type(k) == "string") end
   assert(n <= 1, "column order deduped")
@@ -729,8 +729,12 @@ test("transfer to mail: Send tab open adds listed unbound items, stops when full
   env.SendMailFrame = env.CreateFrame("Frame", "SendMailFrame"); env.SendMailFrame.shown = true
   env.ATTACHMENTS_MAX_SEND = 1
   local attached = {}
-  env.GetSendMailItem = function(i) return attached[i] end
-  env.ClickSendMailItemButton = function(i) attached[i] = env.__picked end
+  env.GetSendMailItem = function(i) if attached[i] then return "Item", 1, 1, attached[i].count end end
+  env.GetSendMailItemLink = function(i) return attached[i] and attached[i].link end
+  env.ClickSendMailItemButton = function(i)
+    local p = env.__picked; local item = env.__bags[p[1]][p[2]]
+    attached[i] = { p[1], p[2], link = item.link, count = item.count }; env.__bags[p[1]][p[2]] = nil
+  end
   env.__addItem(0, 1, 600, 1, { name = "Ore" })
   env.__addItem(0, 2, 601, 1, { name = "Bar" })
   env.__addItem(0, 3, 602, 1, { name = "Gem" })
@@ -744,7 +748,7 @@ test("transfer to mail: Send tab open adds listed unbound items, stops when full
   env.__tick(5)
   assert(attached[1] and not attached[2], "one attached")
   assert(not (attached[1][1] == boundE.bag and attached[1][2] == boundE.slot), "bound item skipped")
-  assert(chatHas(env, "Added 1 item(s) to the mail") and chatHas(env, "full"), "reports full")
+  assert(chatHas(env, "Requested 1 placement(s) in the mail; observed 1") and chatHas(env, "full"), "reports full")
   assert(not R.Mover:Busy())
   R.settings.transferTargets = false
   assert(R.Mover:OpenTarget() == nil, "setting off")
@@ -1201,7 +1205,7 @@ test("upgrading to DB v5 turns the icon rail on once", function()
   local _, R = boot(function(e)
     e.RummageDB = { version = 4, settings = { compactSidebar = false }, chars = {} }
   end)
-  assert(R.settings.compactSidebar == true and R.db.version == 5, "migrated")
+  assert(R.settings.compactSidebar == true and R.db.version == 6, "migrated")
   local _, R2 = boot(function(e)
     e.RummageDB = { version = 5, settings = { compactSidebar = false }, chars = {} }
   end)
@@ -1641,4 +1645,482 @@ test("a fresh sale invalidates an older pending confirmation", function()
   env.StaticPopupDialogs.RUMMAGE_SELL_CONFIRM.OnAccept(nil, oldSale)
   env.__tick(2)
   assert(#env.__used == 1, "superseded confirmation sold a new item")
+end)
+
+
+-- Stateful inventory adapter: real source/cursor/destination deltas, including delayed/rejected requests.
+local function inventoryModel(env, R, options)
+ options = options or {}
+ local model = { calls = { split = 0, pickup = 0, sale = 0, clear = 0 }, queue = {} }
+ local function request(fn)
+  if options.delay then model.queue[#model.queue + 1] = { left = options.delay, fn = fn } else fn() end
+ end
+ env.GetCursorInfo = function() local h = model.held; if h then return "item", h.id, h.link end end
+ env.ClearCursor = function()
+  model.calls.clear = model.calls.clear + 1
+  local h = model.held
+  if h and h.source then
+   local bag, slot = h.source[1], h.source[2]
+   local s = env.__bags[bag][slot]
+   if s and s.link == h.link then s.count = s.count + h.count; model.held = nil
+   elseif not s then env.__bags[bag][slot] = { link = h.link, id = h.id, count = h.count, quality = h.quality }; model.held = nil end
+  end
+ end
+ R.API.SplitContainerItem = function(bag, slot, count)
+  model.calls.split = model.calls.split + 1
+  if options.rejectSplit then return end
+  request(function()
+   local s = env.__bags[bag][slot]
+   if not model.held and s and s.count > count then
+    s.count = s.count - count
+    model.held = { link = s.link, id = s.id, count = count, quality = s.quality, source = { bag, slot } }
+   end
+  end)
+ end
+ R.API.PickupContainerItem = function(bag, slot)
+  model.calls.pickup = model.calls.pickup + 1
+  if options.rejectPlace then return end
+  request(function()
+   local s = env.__bags[bag][slot]
+   if model.held and not s then
+    local h = model.held
+    env.__bags[bag][slot] = { link = h.link, id = h.id, count = h.count, quality = h.quality }
+    model.held = nil
+   elseif not model.held and s then
+    model.held = { link = s.link, id = s.id, count = s.count, quality = s.quality, source = { bag, slot } }
+    env.__bags[bag][slot] = nil
+   end
+  end)
+ end
+ R.API.UseContainerItem = function(bag, slot)
+  model.calls.sale = model.calls.sale + 1
+  if not options.rejectSale then request(function()
+   local item = env.__bags[bag][slot]
+   if item then env.__money = env.GetMoney() + (env.__items[item.id].sell or 0) * item.count; env.__bags[bag][slot] = nil end
+  end) end
+ end
+ function model:tick(n)
+  for _ = 1, n or 1 do
+   for i = #self.queue, 1, -1 do
+    local q = self.queue[i]; q.left = q.left - 1
+    if q.left <= 0 then table.remove(self.queue, i); q.fn() end
+   end
+   env.__tick(1)
+  end
+ end
+ return model
+end
+local function historyHas(R, action, status, reason)
+ for _, e in ipairs(R.db.actionHistory) do
+  if e.action == action and e.status == status and (not reason or (e.reason or ""):find(reason, 1, true)) then return true end
+ end
+ return false
+end
+local function reserveFixture(options, size)
+ local env, R = boot()
+ env.__bags[0].size = size or 8
+ env.__addItem(0, 1, 1700, 20, { quality = 0, sell = 3, stack = 20 })
+ env.MerchantFrame:Show(); assert(R.Junk:SetKeep(1700, 7))
+ return env, R, inventoryModel(env, R, options)
+end
+
+test("rule preview is read-only, search-compatible and requires exact explicit enable", function()
+ local env, R = boot()
+ env.__addItem(0, 1, 1710, 4, { name = "Linen Cloth", quality = 0, sell = 2 })
+ env.__addItem(0, 2, 1711, 3, { name = "Linen Favorite", quality = 1, sell = 10 })
+ R.db.favorites[1711] = 2; R.Data.newItems[1710] = true
+ local preview = assert(R.Junk:PreviewRule("linen"))
+ assert(preview.matchedStacks == 2 and preview.matchedUnits == 7 and preview.sellUnits == 4 and preview.value == 8)
+ assert(#R.db.junkRules == 0 and not env.__used and env.__bags[0][1].count == 4)
+ assert(R.Junk:PreviewRule("#fav").matchedUnits == 3)
+ assert(R.Junk:PreviewRule("#new").matchedUnits == 4)
+ assert(R.Junk:PreviewRule("#junk").matchedUnits == 4)
+ assert(R.Junk:PreviewRule("#unknownkeyword").matchedUnits == 0)
+ assert(not R.Junk:EnableRule({ query = "linen" }))
+ preview.query = "other"; assert(not R.Junk:EnableRule(preview))
+ preview = assert(R.Junk:PreviewRule("linen")); assert(R.Junk:EnableRule(preview) and R.db.junkRules[1] == "linen")
+ assert(not R.Junk:EnableRule(preview), "consent is single-use")
+end)
+
+test("destructive rule drafts reject empty operands and excessive complexity", function()
+ local env, R = boot()
+ for _, q in ipairs({ "", "()", "(|) | linen", "(!) | linen", "linen |", "| linen", 'linen | ""', "(linen", string.rep("(", 17) .. "linen" .. string.rep(")", 17), string.rep("a", 513) }) do
+  local p, err = R.Junk:PreviewRule(q); assert(not p and err and #R.db.junkRules == 0, q)
+ end
+ assert(R.Junk:PreviewRule('(linen | wool) !"bad cloth"'))
+ R.Search.Matches = function() error("parser/plugin failure") end
+ env.__addItem(0, 1, 1710, 1, { sell = 1 })
+ assert(not R.Junk:PreviewRule("linen"))
+end)
+
+test("preview uses reserves protections unknown data and final buyback batch cap", function()
+ local env, R = boot(); env.__bags[0].size = 20; R.settings.buybackSafe = true
+ for i = 1, 15 do env.__addItem(0, i, 1720 + i, 1, { name = "Linen" .. i, quality = 0, sell = i }) end
+ local preview = assert(R.Junk:PreviewRule("linen"))
+ local list, total = R.Junk:Collect()
+ assert(#list == 12 and preview.sellUnits == 12 and preview.value == total)
+ local sum = 0; for _, row in ipairs(preview.rows) do sum = sum + row.sellCount end; assert(sum == 12)
+ R.db.junk[1721] = false; env.__bags[0][2].locked = true; env.__bags[0][3].noValue = true
+ R.Items.InSet = function(_, e) return e.id == 1724 end
+ env.__items[1725] = nil; R.Items.Info = function(self, link) if R.ItemID(link) == 1725 then return nil end; return nil end
+ preview = assert(R.Junk:PreviewRule("linen"))
+ assert(preview.sellUnits == 0 and preview.excludedUnits == 15)
+end)
+
+test("keep quantities validate strictly and aggregate same-ID variants across live bags only", function()
+ local env, R = boot()
+ env.__addItem(0, 1, 1730, 8, { quality = 0, sell = 1 })
+ env.__addItem(1, 1, 1730, 6, { quality = 0, sell = 1 })
+ env.__bags[1][1].link = env.__bags[1][1].link .. "variant"
+ env.__addItem(-1, 1, 1730, 100, { quality = 0, sell = 1 })
+ for _, bad in ipairs({ -1, 1.5, math.huge, 1000001 }) do assert(not R.Junk:SetKeep(1730, bad)) end
+ assert(not R.Junk:SetKeep(0, 1) and not R.Junk:SetKeep(1730.5, 1))
+ assert(R.Junk:SetKeep(1730, 10)); local list = R.Junk:Collect()
+ local count = 0; for _, it in ipairs(list) do count = count + it.sellCount end
+ assert(count == 4 and #list == 1 and list[1].sellCount == 4)
+ assert(R.Junk:SetKeep(1730, 0) and R.db.keepQuantities[1730] == nil)
+end)
+
+test("partial sale splits exact excess and only logs observed inventory changes", function()
+ local env, R, model = reserveFixture()
+ R.Junk:SellAll()
+ assert(model.calls.split == 1 and model.calls.sale == 0 and env.__bags[0][1].count == 7)
+ assert(historyHas(R, "Split", "Requested") and not historyHas(R, "Sale", "Observed"))
+ model:tick(6)
+ assert(env.__bags[0][1].count == 7 and model.calls.sale == 1 and model.held == nil and not R.Junk.ticker)
+ assert(#R.db.junkLog == 1 and R.db.junkLog[1].count == 13 and R.db.junkLog[1].value == 39)
+ assert(historyHas(R, "Split", "Observed") and historyHas(R, "Sale", "Observed"))
+end)
+
+test("delayed split placement and sale requests wait for actual acknowledgements", function()
+ local env, R, model = reserveFixture({ delay = 2 })
+ R.Junk:SellAll(); assert(model.calls.sale == 0 and #R.db.junkLog == 0 and not historyHas(R, "Split", "Observed"))
+ model:tick(3); assert(#R.db.junkLog == 0)
+ model:tick(12)
+ assert(env.__bags[0][1].count == 7 and #R.db.junkLog == 1 and not R.Junk.ticker)
+end)
+
+test("partial sale skips unavailable space or APIs and stops on missing acknowledgements", function()
+ for _, mode in ipairs({ "space", "api", "split", "place", "sale" }) do
+  local opts = {}; opts[mode == "split" and "rejectSplit" or mode == "place" and "rejectPlace" or "rejectSale"] = mode ~= "space" and mode ~= "api"
+  local env, R, model = reserveFixture(opts, mode == "space" and 1 or 8)
+  if mode == "api" then R.API.SplitContainerItem = nil end
+  R.Junk:SellAll(); model:tick(40)
+  assert(not R.Junk.ticker and #R.db.junkLog == 0 and not historyHas(R, "Sale", "Observed"), mode)
+  if mode == "space" or mode == "api" then assert(model.calls.split == 0 and model.calls.sale == 0 and historyHas(R, "Sale", "Skipped"))
+  else assert(historyHas(R, "Sale", "Stopped"), mode) end
+ end
+end)
+
+test("reserve changes and disappearing stock shrink consent without ever selling retained units", function()
+ local env, R, model = reserveFixture()
+ R.Junk:SellAll(); model:tick(2) -- split stack is in the bag and verified
+ assert(R.Junk:SetKeep(1700, 15)); model:tick(8)
+ assert(model.calls.sale == 0 and historyHas(R, "Sale", "Skipped", "Reserve Changed"))
+ local e2, R2, m2 = reserveFixture()
+ e2.__addItem(0, 3, 1700, 10, { quality = 0, sell = 3 })
+ R2.Junk:SetKeep(1700, 27); R2.Junk:SellAll(); m2:tick(2)
+ e2.__bags[0][3] = nil; R2.Junk:SetKeep(1700, 18); m2:tick(8)
+ assert((e2.__bags[0][1] and e2.__bags[0][1].count or 0) + (e2.__bags[0][2] and e2.__bags[0][2].count or 0) >= 18)
+end)
+
+test("sale cursor ownership combat session and mover mutual exclusion are enforced", function()
+ local env, R, model = reserveFixture()
+ R.Junk:SellAll(); R.Mover:Start(function() end, "blocked")
+ assert(not R.Mover:IsShown())
+ env.__combat = true; model:tick(1)
+ assert(model.calls.sale == 0 and model.calls.clear == 1 and env.__bags[0][1].count == 20)
+ local env2, R2, model2 = reserveFixture()
+ R2.Junk:SellAll(); model2.held = { id = 9999, link = "item:9999", count = 1 }
+ model2:tick(1); assert(model2.calls.clear == 0 and model2.held.id == 9999 and not R2.Junk.ticker)
+ local env3, R3, model3 = reserveFixture()
+ R3.Junk:SellAll(); env3.__ev("MERCHANT_CLOSED"); model3:tick(1)
+ assert(not R3.Junk.ticker and model3.calls.sale == 0)
+end)
+
+test("unconfirmed whole-stack sale is Requested not Observed or successful sale log", function()
+ local env, R, model = reserveFixture({ rejectSale = true })
+ R.Junk:SetKeep(1700, 0); R.Junk:SellAll(); model:tick(20)
+ assert(model.calls.sale == 1 and #R.db.junkLog == 0 and historyHas(R, "Sale", "Requested") and not historyHas(R, "Sale", "Observed"))
+ assert(historyHas(R, "Sale", "Stopped", "Unconfirmed"))
+end)
+
+test("history sanitizes bounds IDs enums and pages without exporting local records", function()
+ local env, R = boot(function(e)
+  e.RummageDB = { version = 5, actionHistoryNextID = 1e100, actionHistory = {
+   { id = 1e100, t = 1, action = "Sale", status = "Requested", reason = string.rep("x", 500) },
+   { id = 1e100, t = 2, action = "Sale", status = "Observed", native = function() end },
+   { id = 1, t = math.huge, action = "Sale", status = "Observed" }, { t = 2, action = "Evil", status = "Observed" } } }
+ end)
+ assert(R.db.version == 6 and #R.db.actionHistory == 2)
+ local ids = {}; for _, e in ipairs(R.db.actionHistory) do assert(not ids[e.id]); ids[e.id] = true; assert(not e.native and #(e.reason or "") <= 180) end
+ for i = 1, 110 do R.ActionHistory:Record(i % 2 == 0 and "Sale" or "Transfer", i % 3 == 0 and "Skipped" or "Requested", { count = i, reason = "Example" }) end
+ assert(#R.db.actionHistory == 100)
+ local page, total, pages = R.ActionHistory:Page("All", 2, 8); assert(#page == 8 and total == 100 and pages == 13)
+ page = R.ActionHistory:Page("Skipped", 1, 8); for _, e in ipairs(page) do assert(e.status == "Skipped" or e.status == "Stopped") end
+ assert(not R:ExportSettings():find("actionHistory", 1, true))
+ R.ActionHistory:Clear(); assert(#R.db.actionHistory == 0)
+end)
+
+test("keep and context maps round-trip atomically with legacy and future compatibility", function()
+ local env, R = boot()
+ R.Junk:SetKeep(1700, 12); R.db.profiles["Équipement ;=%"] = {}; assert(R.Extras:SetContextMapping("raid", "Équipement ;=%"))
+ local out = R:ExportSettings(); R.db.keepQuantities = {}; R.db.contextProfiles = {}; assert(R:ImportSettings(out))
+ assert(R.db.keepQuantities[1700] == 12 and R.db.contextProfiles.raid == "Équipement ;=%")
+ assert(not R:ImportSettings("RUM1;scale=1.7;keep.1700=1.5")); assert(R.settings.scale ~= 1.7 and R.db.keepQuantities[1700] == 12)
+ assert(R:ImportSettings("RUM1;scale=1;context.future=Future")); assert(R.db.keepQuantities[1700] == 12 and not R.db.contextProfiles.future)
+ assert(R:ImportSettings("RUM1;keepQuantities.present=1;contextProfiles.present=1"))
+ assert(next(R.db.keepQuantities) == nil and next(R.db.contextProfiles) == nil)
+ R.db.contextProfiles.raid = "Missing Profile"; out = R:ExportSettings(); assert(R:ImportSettings(out)); assert(R.db.contextProfiles.raid == "Missing Profile")
+ R.Junk:SetKeep(1700, 9); R:SaveProfile("One"); R.Junk:SetKeep(1700, 10); R:ApplyProfile("One"); assert(R.db.keepQuantities[1700] == 10)
+end)
+
+test("context mapping editor preserves precedence Unicode unavailable and combat deferral", function()
+ local env, R = boot()
+ R:SaveProfile("Raid Équipement"); R:SaveProfile("Spec Two")
+ assert(R.Extras:SetContextMapping("raid", "Raid Équipement") and R.Extras:SetContextMapping("spec2", "Spec Two"))
+ assert(not R.Extras:SetContextMapping("unknown", "Spec Two") and not R.Extras:SetContextMapping("world", "Missing"))
+ env.GetSpecialization = function() return 2 end; env.IsInInstance = function() return true, "raid" end
+ R.settings.autoProfile = true; env.__combat = true; assert(not R.Extras:ApplyContext())
+ assert(R.db.profileName == "Spec Two")
+ env.__combat = false; env.__ev("PLAYER_REGEN_ENABLED"); env.__settle(2)
+ assert(R.db.profileName == "Raid Équipement" and R.settings.autoProfile)
+ R:DeleteProfile("Raid Équipement"); assert(not R.db.contextProfiles.raid)
+end)
+
+test("Tools workflow invalidates drafts pages clears history and captures all nine profile callbacks", function()
+ local env, R = boot()
+ env.__addItem(0, 1, 1750, 2, { name = "Linen", quality = 0, sell = 1 })
+ R.Tools:Show("preview"); local count = #env.__frames
+ R.Tools.queryBox:SetText("linen"); R.Tools:RunPreview(); assert(R.Tools.preview)
+ R.Tools.queryBox:SetText("wool"); R.Tools.queryBox.scripts.OnTextChanged(R.Tools.queryBox); assert(not R.Tools.preview)
+ R.Tools:EnablePreview(); assert(#R.db.junkRules == 0)
+ R.Tools.queryBox:SetText("linen"); R.Tools:RunPreview(); R.Tools:EnablePreview(); assert(#R.db.junkRules == 1)
+ R.Tools:Show("keep"); R.Tools.keepID:SetText("1750"); R.Tools.keepCount:SetText("1.5"); R.Tools:SaveKeep(false); assert(not R.db.keepQuantities[1750])
+ R.Tools.keepCount:SetText("1"); R.Tools:SaveKeep(false); assert(R.db.keepQuantities[1750] == 1)
+ R:SaveProfile("With Spaces É"); R.Tools:Show("profiles")
+ local menu
+ R.Widgets.Menu = function(_, _, entries) menu = entries end
+ for _, row in ipairs(R.Tools.profileRows) do
+  row.button.scripts.OnClick(row.button, "LeftButton")
+  local picked; for _, item in ipairs(menu) do if item.text == "With Spaces É" then picked = item end end
+  assert(picked); picked.func(); assert(R.db.contextProfiles[row.key] == "With Spaces É")
+ end
+ for i = 1, 25 do R.ActionHistory:Record("Sale", "Requested", { reason = "History Example" }) end
+ R.Tools:Show("history"); R.Tools.page = 2; R.Tools:Refresh(); assert(R.Tools.rows[1].record)
+ local selected = R.Tools.rows[1].record.id; R.Tools.selectedID = selected; R.ActionHistory:Record("Transfer", "Skipped", { reason = "Changed" }); assert(R.Tools.selectedID == selected)
+ for _, tab in ipairs({ "keep", "preview", "profiles", "history" }) do R.Tools:Show(tab); R.Tools.frame:Hide() end
+ assert(#env.__frames == count, "reopening allocated duplicate frames")
+end)
+
+test("grid cues retain shapes and separate F J Q quantity item-level through recycling", function()
+ local env, R = boot(); open(env, R)
+ local link = env.__addItem(0, 1, 1760, 99, { quality = 4, sell = 1, ilvl = 60, equip = "INVTYPE_HEAD" })
+ local e = { id = 1760, link = link, bag = 0, slot = 1, count = 99, icon = 1, quality = 4, fav = 2, junk = true, slots = { { 0, 1 } }, info = { equippable = true, ilvl = 60 } }
+ R.settings.colorblindCues = true; R.settings.gridSize = 20
+ assert(R:GridCellSize() == 48 and R.settings.gridSize == 20)
+ local row = R.UI:GetGridRow(1); R.UI:SetupGridRow(row, { items = { e } }, false)
+ local c = row.cells[1]
+ assert(c.cues.favorite.text:GetText() == "F2" and c.cues.junk.text:GetText() == "J" and c.cues.quality.text:GetText() == "Q4")
+ assert(c.fav:IsShown() and c.junk:IsShown() and c.count:GetText() == 99 and c:GetWidth() == 48)
+ assert(R:GridCueText(e):find("Favorite 2", 1, true) and R:GridCueText(e):find("Epic", 1, true))
+ e.fav, e.junk, e.quality = nil, false, 0; R.UI:SetupGridRow(row, { items = { e } }, false)
+ assert(not c.cues.favorite:IsShown() and not c.cues.junk:IsShown() and c.cues.quality.text:GetText() == "Q0")
+ R.settings.colorblindCues = false; R.UI:SetupGridRow(row, { items = { e } }, false)
+ assert(R:GridCellSize() == 20 and not c.cues.quality:IsShown() and c.cues.quality.text:GetText() == "")
+ R.settings.colorblindCues = true; R.settings.gridSize = 64; assert(R:GridCellSize() == 64)
+end)
+
+test("Categories help follows Add and content extent grows and shrinks", function()
+ local env, R = boot(); R.Options:Show("categories")
+ local p = R.Options.pages.categories.content
+ assert(p.categoryHelp.points[1][2] == p.categoryAdd and p.categoryHelp.points[1][3] == "BOTTOMLEFT")
+ local initial = p.categoryExtent
+ for i = 1, 30 do R.db.categories[i] = { name = "Category " .. i, query = "q:poor", section = "Custom" } end
+ p.categoryRebuild(); assert(p.categoryExtent > initial and p:GetHeight() >= p.categoryExtent)
+ R.db.categories = {}; p.categoryRebuild(); assert(p.categoryExtent == initial)
+end)
+
+-- Append within tests/cases.lua, where test() and boot() are already local.
+test("Tools typography uses separate bounded regions at fonts 6 through 24", function()
+  local env, R = boot()
+  env.UIParent:SetSize(1280, 720)
+  for i = 1, 22 do R.db.keepQuantities[20000 + i] = i end
+  for _, font in ipairs({ 6, 12, 24 }) do
+    R.settings.fontSize = font; R.Widgets:UpdateFonts()
+    R.Tools:Show("keep")
+    local tools, layout = R.Tools, R.Tools.layout
+    assert(layout.line >= font and layout.control >= font + 8, "text/control height at " .. font)
+    assert(tools.status:GetHeight() >= layout.line * 3, "three status lines fit")
+    assert(layout.rowTop >= layout.statusTop + layout.statusHeight + 10, "status does not overlap rows")
+    assert(layout.rowTop + tools.pageSize * (layout.rowHeight + 2) + layout.control + 20 <= tools.frame:GetHeight(), "last row stays above footer")
+    assert(tools.frame:GetWidth() <= 1280 and tools.frame:GetHeight() <= 720, "panel fits viewport")
+    for i, row in ipairs(tools.rows) do
+      local _, _, _, _, detailY = row.detail:GetPoint()
+      assert(-detailY >= row.text:GetHeight() + 4, "row title/detail separated")
+      assert(row.detail:GetHeight() >= font and row.text:GetWidth() < row:GetWidth(), "explicit clipping bounds")
+      assert(type(row.tipTitle) == "function" and type(row.tipBody) == "function", "full row text available on hover")
+      if i > tools.pageSize then assert(not row:IsShown(), "unused rows hidden") end
+    end
+    if font == 24 then assert(tools.pageSize == 4, "large type uses readable shorter pages") end
+    local before = tools.page
+    tools.next:Click()
+    assert(tools.page == before + 1 and tools.rows[1].record.id == 20000 + tools.pageSize + 1, "paging uses effective page size")
+    tools.previous:Click()
+  end
+end)
+
+test("Tools profile paging preserves all context callbacks and clamps after viewport growth", function()
+  local env, R = boot()
+  R.settings.fontSize = 24; R.Widgets:UpdateFonts(); env.UIParent:SetSize(1280, 720)
+  local name = string.rep("Équipement ", 8)
+  R.db.profiles[name] = {}; R.db.contextProfiles.battleground = name
+  R.Tools:Show("profiles")
+  local tools = R.Tools
+  assert(#tools.profileRows == 9 and tools.profilePageSize < 9, "nine identities, bounded visible page")
+  local shown = 0
+  for _, row in ipairs(tools.profileRows) do
+    if row.button:IsShown() then shown = shown + 1 end
+    assert(row.button.text:GetHeight() >= 24 and row.button.text:GetWidth() < row.button:GetWidth(), "profile text bounded")
+    assert(type(row.button.tipTitle) == "function", "full profile name on hover")
+  end
+  assert(shown == tools.profilePageSize)
+  tools.next:Click(); assert(tools.page == 2 and not tools.profileRows[1].button:IsShown())
+  local oldFrames = #env.__frames
+  env.UIParent:SetSize(1920, 1080); R.settings.fontSize = 12; R.Widgets:UpdateFonts()
+  tools:Refresh(); tools:ApplyPosition()
+  assert(tools.page == 1 and tools.profileRows[1].button:IsShown(), "shrunk page count clamps immediately")
+  shown = 0; for _, row in ipairs(tools.profileRows) do if row.button:IsShown() then shown = shown + 1 end end
+  assert(shown == 9 and #env.__frames == oldFrames, "resize reuses all nine mapping controls")
+  tools:Show("keep"); assert(tools.pageSize == 8, "normal fonts retain eight rows")
+end)
+
+
+test("Tools tiny viewport scales a nonoverlapping logical panel", function()
+  local env, R = boot()
+  R.settings.fontSize = 24; R.Widgets:UpdateFonts(); env.UIParent:SetSize(600, 400)
+  R.db.keepQuantities[24000] = 1
+  R.Tools:Show("keep")
+  local tools, l = R.Tools, R.Tools.layout
+  assert(tools.pageSize >= 1)
+  assert(l.rowTop + tools.pageSize * (l.rowHeight + 2) + l.control + 20 <= tools.frame:GetHeight(), "logical row/footer separation survives tiny viewport")
+  assert(tools.frame:GetWidth() * tools.frame:GetScale() <= 600 and tools.frame:GetHeight() * tools.frame:GetScale() <= 400, "whole panel fits via safe scale")
+  assert(tools.rows[1]:IsShown() and tools.rows[1].record.id == 24000)
+end)
+
+
+test("reserve oracle counts protected stock and sells exactly eighteen of thirty units", function()
+ local env, R = boot(); env.MerchantFrame:Show()
+ for i = 1, 3 do env.__addItem(0, i, 1770, 10, { quality = 0, sell = 2, stack = 20 }) end
+ local model = inventoryModel(env, R)
+ R.Junk:SetKeep(1770, 12); R.Junk:SellAll(); model:tick(15)
+ local _, totals = R.Junk:Inventory(); assert(totals[1770] == 12)
+ local sold = 0; for _, row in ipairs(R.db.junkLog) do sold = sold + row.count end; assert(sold == 18)
+ local e2, R2 = boot(); e2.MerchantFrame:Show()
+ local link = e2.__addItem(0, 1, 1771, 20, { quality = 0, sell = 2 })
+ e2.__addItem(0, 2, 1771, 5, { quality = 0, sell = 2 })
+ e2.__bags[0][1].link = link .. "protectedvariant"
+ R2.Items.InSet = function(_, item) return item.link:find("protectedvariant", 1, true) ~= nil end
+ R2.Junk:SetKeep(1771, 22); local list = R2.Junk:Collect()
+ assert(#list == 1 and list[1][2] == 2 and list[1].sellCount == 3, "protected stock counts toward retained total")
+end)
+
+test("lowering a reserve never enlarges an already confirmed sale", function()
+ local env, R, model = reserveFixture()
+ env.__bags[0][1].quality = 2; env.__items[1700].quality = 2; R.db.junk[1700] = true
+ R.Junk:SetKeep(1700, 15); R.Junk:SellAll()
+ local sale = env.__popup.args[3]; assert(sale.list[1].sellCount == 5)
+ R.Junk:SetKeep(1700, 0); env.StaticPopupDialogs.RUMMAGE_SELL_CONFIRM.OnAccept(nil, sale); model:tick(10)
+ assert(env.__bags[0][1].count == 15 and R.db.junkLog[1].count == 5)
+end)
+
+test("partial splits stop on unexpected destinations locked acknowledgement or incompatible free slots", function()
+ for _, mode in ipairs({ "destination", "locked", "family" }) do
+  local env, R, model = reserveFixture()
+  if mode == "family" then
+   R.API.FitsBag = function() return false end
+  end
+  R.Junk:SellAll()
+  if mode == "destination" then env.__addItem(0, 2, 9990, 1, { sell = 1 })
+  elseif mode == "locked" then env.__bags[0][1].locked = true end
+  model:tick(20)
+  assert(model.calls.sale == 0 and #R.db.junkLog == 0 and not R.Junk.ticker, mode)
+ end
+end)
+
+test("manual source moves and missing vendor money are never observed sales", function()
+ for _, mode in ipairs({ "moved", "money" }) do
+  local env, R, model = reserveFixture({ rejectSale = true })
+  R.Junk:SetKeep(1700, 0); R.Junk:SellAll()
+  if mode == "moved" then env.__bags[0][2] = env.__bags[0][1] end
+  env.__bags[0][1] = nil
+  model:tick(20)
+  assert(#R.db.junkLog == 0 and not historyHas(R, "Sale", "Observed") and not chatHas(env, "Sold 1"), mode)
+ end
+end)
+
+test("mail observation requires exact target identity and quantity", function()
+ for _, mode in ipairs({ "wrong", "unknown", "right" }) do
+  local env, R = boot(); mailTarget(env)
+  local link = env.__addItem(0, 1, 1780, 3, { sell = 1 })
+  local target
+  env.GetSendMailItem = function() if target then return "Item", 1780, 1, target.count end end
+  if mode ~= "unknown" then env.GetSendMailItemLink = function() return target and target.link end end
+  env.ClickSendMailItemButton = function()
+   env.__bags[0][1] = nil; target = { link = mode == "wrong" and "item:999" or link, count = 3 }
+  end
+  R.Mover:SendTo("mail", { { link = link, slots = { { 0, 1 } } } }); env.__tick(25)
+  assert(historyHas(R, "Mail", "Requested"))
+  assert(historyHas(R, "Mail", "Observed") == (mode == "right"), mode)
+ end
+end)
+
+test("huge keep IDs reject atomically and startup drops unsafe IDs and context fields", function()
+ local env, R = boot(function(e)
+  e.RummageDB = { version = 5, keepQuantities = { [1e100] = 2, [2147483647] = 3 }, contextProfiles = { future = "X", raid = string.rep("x", 129), world = "Missing" } }
+ end)
+ assert(R.db.keepQuantities[1e100] == nil and R.db.keepQuantities[2147483647] == 3)
+ assert(not R.db.contextProfiles.future and not R.db.contextProfiles.raid and R.db.contextProfiles.world == "Missing")
+ local before = R.settings.scale
+ assert(not R:ImportSettings("RUM1;scale=1.7;keep." .. string.rep("9", 400) .. "=2"))
+ assert(R.settings.scale == before and R.db.keepQuantities[2147483647] == 3)
+ R.db.profiles[string.rep("x", 129)] = {}; assert(not R.Extras:SetContextMapping("raid", string.rep("x", 129)))
+ assert(R:ImportSettings(R:ExportSettings()))
+end)
+
+test("Tools history filter paging confirmed Clear and reserve Remove callbacks work", function()
+ local env, R = boot()
+ for i = 1, 20 do R.ActionHistory:Record("Sale", i % 2 == 0 and "Skipped" or "Requested", { reason = "Example" }) end
+ R.Tools:Show("history")
+ R.Tools.next.scripts.OnClick(R.Tools.next, "LeftButton"); assert(R.Tools.page == 2)
+ R.Tools.previous.scripts.OnClick(R.Tools.previous, "LeftButton"); assert(R.Tools.page == 1)
+ local menu; R.Widgets.Menu = function(_, _, items) menu = items end
+ R.Tools.filterButton.scripts.OnClick(R.Tools.filterButton, "LeftButton")
+ for _, item in ipairs(menu) do if item.text == "Skipped" then item.func() end end
+ assert(R.Tools.filter == "Skipped")
+ for _, row in ipairs(R.Tools.rows) do if row.record then assert(row.record.status == "Skipped") end end
+ R.Tools.clearHistory.scripts.OnClick(R.Tools.clearHistory, "LeftButton")
+ assert(env.__popup.which == "RUMMAGE_CLEAR_HISTORY" and #R.db.actionHistory == 20)
+ env.StaticPopupDialogs.RUMMAGE_CLEAR_HISTORY.OnAccept(); assert(#R.db.actionHistory == 0)
+ R.Junk:SetKeep(1780, 3); R.Tools:Show("keep"); R.Tools.keepID:SetText("1780"); R.Tools:SaveKeep(true); assert(not R.db.keepQuantities[1780])
+ R.Tools:Show("profiles"); assert(R.Tools.status:GetText():find("No Profiles", 1, true))
+ R.db.contextProfiles.raid = "Missing"; R.Tools:Refresh()
+ for _, row in ipairs(R.Tools.profileRows) do if row.key == "raid" then assert(row.button.text:GetText():find("Unavailable", 1, true)) end end
+end)
+
+test("grid and menus remain bounded at font24 with full text preserved", function()
+ local env, R = boot(); open(env, R)
+ R.settings.fontSize = 24; R.Widgets:UpdateFonts(); R.settings.colorblindCues = true; R.settings.gridSize = 20
+ local e = { id = 1790, link = "item:1790", bag = 0, slot = 1, count = 1000000, icon = 1, quality = 7, fav = 8, junk = true, slots = { { 0, 1 } }, info = { equippable = true, ilvl = 999 } }
+ local row = R.UI:GetGridRow(1); R.UI:SetupGridRow(row, { items = { e } }, false)
+ local c = row.cells[1]
+ assert(c:GetWidth() >= 120 and c.cues.quality:GetHeight() >= 24 and c.cues.quality:GetWidth() >= 33)
+ local _, _, _, _, ilvlY = c.ilvl:GetPoint(); assert(ilvlY > c.cues.quality:GetHeight())
+ local text = string.rep("Long Profile Name ", 15); local clicked = false
+ R.Widgets:Menu(R.UI.frame, { { text = text, func = function() clicked = true end } })
+ local menu = env.RummageMenu; assert(menu:GetWidth() <= env.UIParent:GetWidth() - 24)
+ local button
+ for _, child in ipairs(menu.children) do if child.text and child.text:GetText() == text then button = child end end
+ assert(button and button:GetHeight() >= 30 and button.text:GetHeight() >= 30)
+ button.scripts.OnClick(button, "LeftButton"); assert(clicked and not menu:IsShown())
 end)

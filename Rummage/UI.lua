@@ -558,7 +558,7 @@ function UI:LayoutIfChanged()
 	if not g then g = {}; self.geom = g end
 	local w, h = self.frame:GetWidth(), self.frame:GetHeight()
 	if g.w ~= w or g.h ~= h or g.chips ~= self.chips:IsShown() or g.view ~= s.viewMode
-		or g.rh ~= s.rowHeight or g.grid ~= s.gridSize or g.side ~= s.showSidebar
+		or g.rh ~= s.rowHeight or g.grid ~= R:GridCellSize() or g.side ~= s.showSidebar
 		or g.compact ~= s.compactSidebar or g.cols ~= s.categoryColumns or g.sidePos ~= s.sidebarSide
 		or g.theme ~= W:Skin() or g.rail ~= self:RailSide() then
 		return self:Layout()
@@ -579,7 +579,7 @@ function UI:Layout()
 	local g = self.geom or {}
 	self.geom = g
 	g.w, g.h, g.chips, g.view = self.frame:GetWidth(), self.frame:GetHeight(), self.chips:IsShown(), s.viewMode
-	g.rh, g.grid, g.side, g.compact, g.theme = s.rowHeight, s.gridSize, s.showSidebar, s.compactSidebar, W:Skin()
+	g.rh, g.grid, g.side, g.compact, g.theme = s.rowHeight, R:GridCellSize(), s.showSidebar, s.compactSidebar, W:Skin()
 	g.cols, g.sidePos = s.categoryColumns, s.sidebarSide
 	g.rail = self:RailSide()
 	g.sortKey, g.sortAsc = s.sortKey, s.sortAsc
@@ -643,13 +643,13 @@ end
 function UI:VisibleRows()
 	local h = self.list:GetHeight() or 300
 	if R.settings.viewMode == "grid" then
-		return math.max(1, math.floor(h / (R.settings.gridSize + 2)))
+		return math.max(1, math.floor(h / (R:GridCellSize() + 2)))
 	end
 	return math.max(1, math.floor(h / self:RowHeight()))
 end
 
 function UI:GridPerRow()
-	local size = R.settings.gridSize + 2
+	local size = R:GridCellSize() + 2
 	return math.max(1, math.floor(self:ListWidth() / size))
 end
 
@@ -1098,7 +1098,7 @@ function UI:Render()
 	local pool, other = grid and self.gridRows or self.rows, grid and self.rows or self.gridRows
 	for _, r in ipairs(other) do r:Hide() end
 
-	local rh = grid and (s.gridSize + 2) or self:RowHeight()
+	local rh = grid and (R:GridCellSize() + 2) or self:RowHeight()
 	for i = 1, visible do
 		local d = display[self.offset + i]
 		local row = grid and self:GetGridRow(i) or self:GetListRow(i)
@@ -1109,7 +1109,7 @@ function UI:Render()
 				row:SetPoint("TOPLEFT", 0, -(i - 1) * rh)
 				row:SetPoint("RIGHT", self.list, "RIGHT", -SCROLL_W - 2, 0)
 			end
-			row:SetHeight(d and d.header and 20 or s.gridSize)
+			row:SetHeight(d and d.header and 20 or R:GridCellSize())
 		end
 		if not d then
 			row:Hide()

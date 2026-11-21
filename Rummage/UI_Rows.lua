@@ -93,6 +93,7 @@ btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 	btn:HookScript("OnEnter", function(self)
 		if self.rummageRow then UI:Highlight(self.rummageRow, true) end
 		local e = self.rummageEntry
+		if e and R.settings.colorblindCues then GameTooltip:AddLine(R:GridCueText(e), 1, 1, 1); GameTooltip:Show() end
 		if e and e.new then
 			R.Data:ClearNew(e.id)
 			e.new = nil
@@ -460,6 +461,17 @@ local function MakeGridCell(parent)
 	c.junk:SetPoint("LEFT", 2, 0)
 	c.ilvl = W:Text(c, "tiny")
 	c.ilvl:SetPoint("BOTTOMLEFT", 2, 2)
+	c.cues = {}
+	for _, key in ipairs({ "favorite", "junk", "quality" }) do
+		local badge = CreateFrame("Frame", nil, c)
+		badge:SetSize(key == "junk" and 12 or 18, 12)
+		badge.bg = badge:CreateTexture(nil, "BACKGROUND"); badge.bg:SetAllPoints(); badge.bg:SetColorTexture(0, 0, 0, 1)
+		badge.text = W:Text(badge, "tiny"); badge.text:SetPoint("CENTER"); badge.text:SetTextColor(1, 1, 1)
+		c.cues[key] = badge
+	end
+	c.cues.favorite:SetPoint("TOPLEFT", 1, -1)
+	c.cues.junk:SetPoint("TOPRIGHT", -1, -1)
+	c.cues.quality:SetPoint("BOTTOMLEFT", 1, 1)
 	c.quest = c:CreateTexture(nil, "OVERLAY")
 	c.quest:SetTexture("Interface\\GossipFrame\\AvailableQuestIcon")
 	c.quest:SetSize(14, 14)
@@ -484,6 +496,7 @@ local function MakeGridCell(parent)
 			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
 			GameTooltip:SetHyperlink(e.link)
 			UI:AddGuildHint(GameTooltip, e)
+			if R.settings.colorblindCues then GameTooltip:AddLine(R:GridCueText(e), 1, 1, 1) end
 			GameTooltip:Show()
 		end
 	end)
@@ -522,7 +535,7 @@ function UI:GetGridRow(i)
 end
 
 function UI:SetupGridRow(row, d, interactive)
-	local size = R.settings.gridSize
+	local size = R:GridCellSize()
 	row.display = d
 	local skin = W:Skin()
 	if d.header then
@@ -571,6 +584,18 @@ function UI:SetupGridRow(row, d, interactive)
 		end
 		local r, g, b = R.QualityColor(e.quality)
 		if e.quality and e.quality >= 2 then c.border:SetColorTexture(r, g, b, 1) else c.border:SetColorTexture(0.2, 0.2, 0.2, 1) end
+		local cues = R.settings.colorblindCues
+		local badgeHeight = math.max(12, R.settings.fontSize + 2)
+		local badgeWidth = math.max(18, (R.settings.fontSize - 2) * 1.5 + 4)
+		for _, badge in pairs(c.cues) do badge:SetSize(badgeWidth, badgeHeight); badge.text:SetHeight(badgeHeight); badge.text:SetWidth(badgeWidth) end
+		c.cues.favorite.text:SetText(cues and e.fav and ("F" .. e.fav) or "")
+		c.cues.junk.text:SetText(cues and e.junk and "J" or "")
+		c.cues.quality.text:SetText(cues and ("Q" .. math.max(0, math.min(7, e.quality or 1))) or "")
+		c.cues.favorite:SetShown(cues and e.fav ~= nil); c.cues.junk:SetShown(cues and e.junk or false); c.cues.quality:SetShown(cues)
+		c.ilvl:ClearAllPoints(); c.ilvl:SetPoint("BOTTOMLEFT", 2, cues and (badgeHeight + 2) or 2)
+		c.fav:ClearAllPoints(); c.fav:SetPoint(cues and "TOPLEFT" or "TOPRIGHT", cues and 1 or -1, cues and (-badgeHeight - 2) or -1)
+		c.junk:ClearAllPoints(); c.junk:SetPoint(cues and "TOPRIGHT" or "LEFT", cues and -1 or 2, cues and (-badgeHeight - 2) or 0)
+		c.upgrade:ClearAllPoints(); c.upgrade:SetPoint(cues and "CENTER" or "TOPLEFT", cues and 0 or 1, cues and 0 or -1)
 		c.count:SetText(e.count > 1 and e.count or "")
 		c.fav:SetShown(e.fav ~= nil)
 		if e.fav then c.fav:SetTexture(FAV_ICON .. e.fav) end

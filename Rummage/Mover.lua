@@ -29,7 +29,7 @@ local function IsLocked(bag, slot)
 	return locked
 end
 
-function Mover:Busy() return self:IsShown() or self.sendTicker ~= nil end
+function Mover:Busy() return self:IsShown() or self.sendTicker ~= nil or (R.Junk and R.Junk.ticker ~= nil) end
 
 function Mover:Start(planner, label, onDone)
 	if InCombatLockdown() then
@@ -55,7 +55,7 @@ end
 function Mover:Stop(msg, completed)
 	self:Hide()
 	self.planner = nil
-	if msg then R:Print(msg) end
+	if msg then R.ActionHistory:Record("Transfer", "Stopped", { reason = msg }); R:Print(msg) end
 	if self.onDone then
 		local fn = self.onDone
 		self.onDone = nil
@@ -74,9 +74,16 @@ Mover:SetScript("OnUpdate", function(self, elapsed)
 
 	local last = self.last
 	if last then
-		if IsLocked(last.from[1], last.from[2]) or IsLocked(last.to[1], last.to[2]) then
+		local source, count, _, _, sourceLocked = API.GetSlotInfo(last.from[1], last.from[2])
+		local target, quantity, _, _, targetLocked = API.GetSlotInfo(last.to[1], last.to[2])
+		local fromMatches = last.remaining == 0 and not source or (source == last.link and count == last.remaining)
+		if fromMatches and target == last.link and quantity == last.expected and not sourceLocked and not targetLocked then
+			R.ActionHistory:Record("Transfer", "Observed", { itemID = R.ItemID(last.link), link = last.link, count = last.amountMoved,
+				from = last.from[1] .. ":" .. last.from[2], to = last.to[1] .. ":" .. last.to[2], reason = "Source And Destination Quantities Verified" })
+			self.last = nil
+		else
 			self.lockTime = self.lockTime + elapsed
-			if self.lockTime > LOCK_TIMEOUT then return self:Stop("Stopped: server did not respond.") end
+			if self.lockTime > LOCK_TIMEOUT then return self:Stop("Stopped: transfer remains unconfirmed.") end
 			return
 		end
 	end
@@ -88,6 +95,12 @@ Mover:SetScript("OnUpdate", function(self, elapsed)
 	local move, err = self.planner()
 	if not move then return self:Stop(err, err == nil) end
 
+	local link, count = API.GetSlotInfo(move.from[1], move.from[2])
+	local _, targetCount = API.GetSlotInfo(move.to[1], move.to[2])
+	move.link, move.amountMoved = link, move.amount or count or 1
+	move.remaining, move.expected = (count or 1) - move.amountMoved, (targetCount or 0) + move.amountMoved
+	R.ActionHistory:Record("Transfer", "Requested", { itemID = link and R.ItemID(link), link = link, count = move.amountMoved,
+		from = move.from[1] .. ":" .. move.from[2], to = move.to[1] .. ":" .. move.to[2], reason = "Awaiting Inventory Placement" })
 	if move.amount then
 		API.SplitContainerItem(move.from[1], move.from[2], move.amount)
 	else
@@ -196,6 +209,8 @@ function Mover:PlanTransfer(sources, targets)
 				local dst = Mover:FindTarget(targets, link, id, count or 1)
 				if not dst then return nil, "Not enough free space." end
 				return { from = { src[1], src[2] }, to = dst }
+			else
+				R.ActionHistory:Record("Transfer", "Skipped", { link = src[3], count = src[4], from = src[1] .. ":" .. src[2], reason = "Source Changed, Missing Or Locked" })
 			end
 		end
 	end
@@ -241,6 +256,11 @@ local TARGETS = {
 		open = function() return SendMailFrame and SendMailFrame:IsShown() and MailFrame and MailFrame:IsShown() end,
 		max = function() return ATTACHMENTS_MAX_SEND or 12 end,
 		used = function(i) return GetSendMailItem and GetSendMailItem(i) ~= nil end,
+		matches = function(i, link, count)
+			local target = GetSendMailItemLink and GetSendMailItemLink(i)
+			local quantity = GetSendMailItem and select(4, GetSendMailItem(i))
+			return target == link and quantity == count
+		end,
 		place = function(i) if ClickSendMailItemButton then ClickSendMailItemButton(i); return true end end,
 	},
 	trade = {
@@ -249,6 +269,11 @@ local TARGETS = {
 		-- the last trade slot is "will not be traded"; only the first six change hands
 		max = function() return math.min(6, MAX_TRADABLE_ITEMS or 6) end,
 		used = function(i) return GetTradePlayerItemLink and GetTradePlayerItemLink(i) ~= nil end,
+		matches = function(i, link, count)
+			local target = GetTradePlayerItemLink and GetTradePlayerItemLink(i)
+			local quantity = GetTradePlayerItemInfo and select(3, GetTradePlayerItemInfo(i))
+			return target == link and quantity == count
+		end,
 		place = function(i) if ClickTradeButton then ClickTradeButton(i); return true end end,
 	},
 }
@@ -293,29 +318,47 @@ function Mover:SendTo(kind, entries)
 	local sources = {}
 	for _, e in ipairs(entries) do
 		if not e.bound and not e.foreign then
-			for _, s in ipairs(e.slots) do sources[#sources + 1] = { s[1], s[2], e.link } end
+			for _, s in ipairs(e.slots) do
+				local _, count = API.GetSlotInfo(s[1], s[2])
+				sources[#sources + 1] = { s[1], s[2], e.link, count or 1 }
+			end
 		end
 	end
 	if #sources == 0 then return R:Print("Nothing listed can be sent (bound items are skipped).") end
-	local i, placed, full = 0, 0, false
+	local i, placed, observed, full = 0, 0, 0, false
+	local pending
 	local function finish()
 		if self.sendTicker then self.sendTicker:Cancel(); self.sendTicker = nil end
-		local msg = format("Added %d item(s) to the %s.", placed, kind == "mail" and "mail" or "trade")
+		local msg = format("Requested %d placement(s) in the %s; observed %d.", placed, kind == "mail" and "mail" or "trade", observed)
 		if full then msg = msg .. " It is full; the rest stayed in your bags." end
 		R:Print(msg)
 		R:Fire("MOVER_CHANGED", false)
 	end
 	local function step()
-		if not t.open() or InCombatLockdown() or GetCursorInfo() then return finish() end
+		local action = kind == "mail" and "Mail" or "Trade"
+		if pending then
+			local link = API.GetSlotInfo(pending.src[1], pending.src[2])
+			if not link and t.matches(pending.index, pending.src[3], pending.src[4]) then
+				observed = observed + 1
+				R.ActionHistory:Record(action, "Observed", { link = pending.src[3], reason = "Bag Source Removed And Attachment Occupied; Not Sent Or Accepted" })
+				pending = nil
+			else
+				pending.waits = pending.waits + 1
+				if pending.waits > 20 then R.ActionHistory:Record(action, "Stopped", { link = pending.src[3], reason = "Placement Remains Unconfirmed" }); return finish() end
+				if t.open() and not InCombatLockdown() and not GetCursorInfo() then return end
+			end
+		end
+		if not t.open() or InCombatLockdown() or GetCursorInfo() then R.ActionHistory:Record(action, "Stopped", { reason = "Target Closed, Combat Or Cursor Occupied" }); return finish() end
 		i = i + 1
 		local src = sources[i]
 		if not src then return finish() end
 		local link, _, _, _, locked = API.GetSlotInfo(src[1], src[2])
-		if link ~= src[3] or locked then return end -- moved or busy: skip it
+		if link ~= src[3] or locked then R.ActionHistory:Record(action, "Skipped", { link = src[3], reason = "Source Changed Or Locked" }); return end
 		local idx = FreeTargetSlot(t)
-		if not idx then full = true; return finish() end
+		if not idx then full = true; R.ActionHistory:Record(action, "Skipped", { link = src[3], reason = "Target Is Full; Item Stayed In Bags" }); return finish() end
+		R.ActionHistory:Record(action, "Requested", { link = src[3], from = src[1] .. ":" .. src[2], to = tostring(idx), reason = "Awaiting Attachment Placement; Not Sent Or Accepted" })
 		API.PickupContainerItem(src[1], src[2])
-		if t.place(idx) then placed = placed + 1 end
+		if t.place(idx) then placed = placed + 1; pending = { src = src, index = idx, waits = 0 } end
 		if GetCursorInfo() then ClearCursor() end
 	end
 	R:Fire("MOVER_CHANGED", true)

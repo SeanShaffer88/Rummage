@@ -450,6 +450,7 @@ function W:Menu(anchor, items, point, relPoint, x, y)
 	W:Backdrop(menu, "main")
 	for _, b in ipairs(menuButtons) do b:Hide() end
 	local width, y0 = 120, -6
+	local lineHeight = math.max(18, (R.settings.fontSize or 12) + 6)
 	for i, it in ipairs(items) do
 		local b = menuButtons[i]
 		if not b then
@@ -474,6 +475,9 @@ function W:Menu(anchor, items, point, relPoint, x, y)
 			W:SetTooltip(b.del, "Delete")
 			menuButtons[i] = b
 		end
+		b:SetHeight(lineHeight)
+		b.text:SetHeight(lineHeight); b.text:SetWordWrap(false)
+		W:SetTooltip(b, it.text or "")
 		b:SetFrameLevel(menu:GetFrameLevel() + 2)
 		b.text:SetText(it.text or "")
 		b.check:SetShown(it.checked and true or false)
@@ -502,8 +506,10 @@ function W:Menu(anchor, items, point, relPoint, x, y)
 		b:SetPoint("RIGHT", menu, "RIGHT", -4, 0)
 		b:Show()
 		width = math.max(width, b.text:GetStringWidth() + 48)
-		y0 = y0 - 18
+		y0 = y0 - lineHeight
 	end
+	width = math.min(width, math.max(120, UIParent:GetWidth() - 24))
+	for _, b in ipairs(menuButtons) do b.text:SetWidth(width - 48) end
 	menu:SetSize(width, -y0 + 6)
 	menu:ClearAllPoints()
 	menu:SetPoint(point or "TOPLEFT", anchor, relPoint or "BOTTOMLEFT", x or 0, y or -2)

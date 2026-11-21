@@ -156,3 +156,16 @@ Extract the `Rummage` folder into
 ## License
 
 Copyright © 2026 Malikor. Released under the GNU General Public License v3.0 or later — see `LICENSE`.
+
+
+## Safe Inventory Tools
+
+Open `/rum tools` for Preview, Keep, History and Profiles. Preview a proposed search rule, inspect matched units/value and exclusions, then press Enable Rule separately. Editing the query invalidates its preview. Enabled rules can be removed without selling anything.
+
+Keep Quantities apply per item ID across your current bags; bank, mail, guild storage and alt caches are excluded. Protected or non-junk stacks still count toward stock. Enter zero or Remove to clear a reserve. An exact partial sale needs a compatible free carried-bag slot and acknowledged split/placement; otherwise it is skipped with a reason. Inventory changes, combat, closed merchants and occupied cursors stop unsafe work.
+
+`/rum history` shows a maximum of 100 local action records. Requested is an unconfirmed API request. Observed sales require matching inventory and money changes; Observed mail/trade means attachment placement, never sent mail or accepted trade. History records no recipients or mail bodies and is excluded from settings export/profiles.
+
+Profiles maps the existing nine spec/instance contexts to saved profiles. Instance type takes precedence, then spec, then World outside instances. Combat defers switching; missing profiles are shown as Unavailable. Rules, reserves and context maps are account-wide, while profiles remain settings snapshots.
+
+With Colourblind-Safe Quality Tags enabled, grid cells add F1–F8 (favorite), J (junk), and Q0–Q7 (Poor through Heirloom). High-contrast text and existing shapes remain together. The effective minimum grid size is 48 pixels and grows for large fonts; the saved icon size stays unchanged. Tools and shared menus use font-derived layout and paged lists; 1280×720 and 1920×1080 are the tested viewport sizes.

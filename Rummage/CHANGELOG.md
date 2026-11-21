@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.12.0 — 2026-11-21
+
+**Added**
+- **Rummage Tools** (`/rum tools`): preview an auto-junk rule against current bags before explicitly enabling it, with planned quantities, value, reserve and exclusion reasons.
+- **Keep Quantities**: retain a whole quantity per item across current carried bags. Sell only approved excess; partial stacks use verified split/placement steps and require a compatible empty slot.
+- **Action History** (`/rum history`): up to 100 local records with Requested, Observed, Skipped and Stopped statuses, reasons, filtering, paging and confirmed clearing. A sale is Observed only after the expected inventory decrease and vendor money gain.
+- **Context Profiles**: choose saved profiles for all nine existing spec/instance contexts from a native editor; unavailable targets remain visible and inactive.
+- **Grid Text Cues**: existing colourblind cues now show F1–F8 favorite, J junk and Q0–Q7 quality alongside the existing shapes. Effective grid size grows with font size while enabled (minimum 48 px); saved size and setting-off appearance are preserved.
+
+**Fixed**
+- Category help follows the Add button and scroll content grows and shrinks with the category list.
+- Tools controls, rows and menus adapt to supported font sizes; dense lists use fewer paged rows when large text needs space.
+- Keep quantities and context mappings round-trip with explicit empty-list markers; malformed imports reject atomically. Existing partial exports remain compatible. History stays local and outside profiles/exports.
+
+**Verification**
+- 98 offline Lua 5.1 cases pass, including stateful delayed/rejected inventory requests and font/viewport bounds. Mock checks do not establish real client taint, protected action, server or accessibility behavior.
+
 ## 1.11.1 — 2026-11-21
 
 **Fixed**

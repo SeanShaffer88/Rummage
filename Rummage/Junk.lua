@@ -63,33 +63,122 @@ local function MerchantOpen()
 end
 Junk.MerchantOpen = MerchantOpen
 
--- Collects sellable junk in the player's bags: list of {bag, slot, value}
-function Junk:Collect()
-	local list, total = {}, 0
-	for _, bag in ipairs(API.InvBagList) do
-		if not (API.KEYRING and bag == API.KEYRING) then
-			for slot = 1, API.GetNumSlots(bag) or 0 do
-				local link, count, _, quality, locked, itemID, _, noValue = API.GetSlotInfo(bag, slot)
-				if link and not locked then
-					local inf = R.Items:Info(link)
-					local e = { id = itemID or R.ItemID(link), bag = bag, slot = slot, quality = inf and inf.quality or quality,
-						link = link, count = count or 1, info = inf, name = inf and inf.name, lname = inf and inf.lname }
-					-- favorites (setting) and equipment-set items (always) are never sold
-					local protected = (R.settings.protectFavorites and R.db.favorites[e.id]) or R.Items:InSet(e)
-					if inf and inf.sell > 0 and not noValue and not protected and self:IsJunk(e) then
-						local v = inf.sell * (count or 1)
-						list[#list + 1] = { bag, slot, v, e.quality or 0, link, count or 1 }
-						total = total + v
-					end
-				end
-			end
-		end
-	end
-	if R.settings.buybackSafe and #list > 12 then
-		table.sort(list, function(a, b) return a[3] > b[3] end)
-		for i = #list, 13, -1 do total = total - list[i][3]; list[i] = nil end
-	end
-	return list, total
+-- Inventory-only planner shared by preview and execution; reserves count every variant.
+local previews = setmetatable({}, { __mode = "k" })
+local function integer(v, maximum)
+ return type(v) == "number" and v == v and v >= 0 and v <= maximum and v == math.floor(v)
+end
+function Junk:SetKeep(id, quantity)
+ id, quantity = tonumber(id), tonumber(quantity)
+ if not integer(id, 2147483647) or id == 0 or not integer(quantity, 1000000) then return false, "Use A Positive Item ID And A Whole Keep Quantity (0 To Remove)" end
+ local n = 0; for _ in pairs(R.db.keepQuantities) do n = n + 1 end
+ if quantity > 0 and not R.db.keepQuantities[id] and n >= 500 then return false, "Keep List Is Full (500 Items)" end
+ R.db.keepQuantities[id] = quantity > 0 and quantity or nil
+ R:RequestRefresh()
+ return true
+end
+function Junk:Inventory()
+ local entries, totals = {}, {}
+ for _, bag in ipairs(API.InvBagList) do
+  if bag ~= API.KEYRING then
+   for slot = 1, API.GetNumSlots(bag) or 0 do
+    local link, count, icon, quality, locked, id, bound, noValue = API.GetSlotInfo(bag, slot)
+    if link then
+     id, count = id or R.ItemID(link), count or 1
+     local inf = R.Items:Info(link)
+     local name = inf and inf.name or link:match("%[(.-)%]") or link
+     local e = { id = id, bag = bag, slot = slot, link = link, count = count, icon = icon, bound = bound,
+      info = inf, quality = inf and inf.quality or quality, locked = locked, noValue = noValue,
+      name = name, lname = name:lower() }
+     e.q = e.quality
+     R.Items:Prepare(e, R.Data.me, true, true)
+     entries[#entries + 1] = e
+     if id then totals[id] = (totals[id] or 0) + count end
+    end
+   end
+  end
+ end
+ return entries, totals
+end
+function Junk:Eligibility(e, query)
+ if not e.info then return "Unknown Item Data" end
+ if e.locked then return "Item Is Locked" end
+ if e.noValue or e.info.sell <= 0 then return "No Vendor Value" end
+ if (R.settings.protectFavorites or query) and R.db.favorites[e.id] then return "Favorite Is Protected" end
+ if R.Items:InSet(e) then return "Equipment Set Is Protected" end
+ if query then
+  if R.db.junk[e.id] == false then return "Manual Keep Override" end
+ else
+  if not self:IsJunk(e) then return "Not Junk" end
+ end
+end
+function Junk:Plan(query)
+ local entries, totals = self:Inventory()
+ local budgets = {}
+ for id, total in pairs(totals) do budgets[id] = math.max(0, total - (R.db.keepQuantities[id] or 0)) end
+ local result = { query = query, rows = {}, matchedStacks = 0, matchedUnits = 0, sellUnits = 0, value = 0, retainedUnits = 0, excludedUnits = 0 }
+ local list = {}
+ for _, e in ipairs(entries) do
+  if not query or R.Search:Matches(query, e) then
+   local reason = self:Eligibility(e, query)
+   local amount = not reason and math.min(e.count, budgets[e.id] or 0) or 0
+   if not reason and amount == 0 then reason = "Keep Quantity Reserved" end
+   if amount > 0 then
+    budgets[e.id] = budgets[e.id] - amount
+    local it = { e.bag, e.slot, e.info.sell * amount, e.quality or 0, e.link, e.count,
+     id = e.id, sellCount = amount, unitValue = e.info.sell }
+    list[#list + 1] = it
+   end
+   result.rows[#result.rows + 1] = { id = e.id, link = e.link, count = e.count, sellCount = amount,
+    reason = reason or (amount < e.count and "Keep Quantity Reserved; Split Required" or "Eligible"), value = e.info and e.info.sell * amount or nil }
+   if amount > 0 then list[#list].previewRow = result.rows[#result.rows] end
+   result.matchedStacks, result.matchedUnits = result.matchedStacks + 1, result.matchedUnits + e.count
+   result.sellUnits, result.value = result.sellUnits + amount, result.value + (e.info and e.info.sell * amount or 0)
+   if reason == "Keep Quantity Reserved" or (not reason and amount < e.count) then
+    result.retainedUnits = result.retainedUnits + e.count - amount
+   elseif reason then result.excludedUnits = result.excludedUnits + e.count end
+  end
+ end
+ if R.settings.buybackSafe and #list > 12 then
+  table.sort(list, function(a, b) return a[3] > b[3] end)
+  while #list > 12 do
+   local dropped = list[#list]
+   local row = dropped.previewRow
+   result.sellUnits, result.value = result.sellUnits - row.sellCount, result.value - (row.value or 0)
+   row.sellCount, row.value, row.reason = 0, 0, "Buyback-Safe Batch Limit"
+   list[#list] = nil
+  end
+ end
+ local value = 0; for _, it in ipairs(list) do value = value + it[3] end
+ return list, value, result
+end
+function Junk:Collect() return self:Plan() end
+function Junk:PreviewRule(query)
+ if type(query) ~= "string" then return nil, "Enter A Search Query" end
+ query = query:match("^%s*(.-)%s*$")
+ if #query == 0 or #query > 512 or not query:find("[%w\128-\255]") then return nil, "Enter A Meaningful Query (Maximum 512 Characters)" end
+ if query:find("%(%s*%)") or query:find('"%s*"') then return nil, "Empty Groups Or Quoted Terms Are Not Allowed" end
+ local depth, quoted = 0, false
+ for i = 1, #query do
+  local c = query:sub(i, i)
+  if c == '"' then quoted = not quoted
+  elseif not quoted and c == "(" then depth = depth + 1; if depth > 16 then return nil, "Query Nesting Is Limited To 16" end
+  elseif not quoted and c == ")" then depth = depth - 1; if depth < 0 then return nil, "Unmatched Parenthesis" end end
+ end
+ if depth ~= 0 or quoted then return nil, "Close Every Group And Quoted Term" end
+ if not R.Search:ValidateQuery(query) then return nil, "Every Group And Alternative Must Contain A Search Term" end
+ local ok, _, _, preview = pcall(self.Plan, self, query)
+ if not ok then return nil, "The Search Could Not Be Evaluated" end
+ previews[preview] = query
+ return preview
+end
+function Junk:EnableRule(preview)
+ if type(preview) ~= "table" or previews[preview] ~= preview.query then return false, "Preview This Exact Query First" end
+ if #R.db.junkRules >= 8 then return false, "Eight Rules Are Already Enabled" end
+ R.db.junkRules[#R.db.junkRules + 1] = preview.query
+ previews[preview] = nil
+ R:RequestRefresh()
+ return true
 end
 
 function Junk:AutoRepair()
@@ -135,66 +224,146 @@ end
 
 local merchantSession = 0
 
+local function History(status, it, reason)
+ return R.ActionHistory:Record("Sale", status, { itemID = it and it.id, link = it and it[5],
+  count = it and (it.sellCount or it[6]), value = it and it[3], reason = reason,
+  from = it and (it[1] .. ":" .. it[2]), to = "Merchant" })
+end
+local function CursorMatches(it)
+ local kind, id, link = GetCursorInfo()
+ return kind == "item" and id == it.id and (not link or link == it[5])
+end
+local function FreeSplitSlot(it)
+ if not API.GetNumFreeSlots or not API.FitsBag then return end
+ for _, bag in ipairs(API.InvBagList) do
+  if bag ~= API.KEYRING then
+   local _, family = API.GetNumFreeSlots(bag)
+   if API.FitsBag(it.id, family or 0) then
+    for slot = 1, API.GetNumSlots(bag) or 0 do if not API.GetSlotInfo(bag, slot) then return { bag, slot } end end
+   end
+  end
+ end
+end
+function Junk:SaleAllowance(it)
+ local entries, totals = self:Inventory()
+ for _, e in ipairs(entries) do
+  if e.bag == it[1] and e.slot == it[2] then
+   if e.link ~= it[5] or e.count ~= it[6] then return 0, "Source Stack Changed" end
+   local reason = self:Eligibility(e)
+   if reason then return 0, reason end
+   local budget = math.max(0, (totals[e.id] or 0) - (R.db.keepQuantities[e.id] or 0))
+   return math.min(it.sellCount or it[6], budget), budget == 0 and "Keep Quantity Reserved" or nil
+  end
+ end
+ return 0, "Source Item Moved"
+end
 function Junk:SellAll(confirmed)
-	if not MerchantOpen() then
-		R:Print("Open a merchant to sell junk.")
-		return
-	end
-	if self.ticker or InCombatLockdown() then return end
-	if confirmed == true then confirmed = self.pendingSale end -- legacy caller: only the pending snapshot
-	local list, total
-	if type(confirmed) == "table" then
-		if confirmed ~= self.pendingSale or confirmed.session ~= merchantSession then return end
-		list, total = confirmed.list, confirmed.total
-		self.pendingSale = nil
-	else
-		self.pendingSale = nil -- a fresh action supersedes any earlier confirmation
-		list, total = self:Collect()
-	end
-	if #list == 0 then
-		R:Print("No junk to sell.")
-		return
-	end
-	if not confirmed and self:NeedsConfirm(list, total) then
-		self.pendingSale = { list = list, total = total, session = merchantSession }
-		StaticPopup_Show("RUMMAGE_SELL_CONFIRM", #list, R.FormatMoney(total), self.pendingSale)
-		return
-	end
-	local session = merchantSession
-	local i = 0
-	local sold, soldValue = 0, 0
-	local function finish(stopped)
-		self.ticker:Cancel(); self.ticker = nil
-		if sold > 0 then
-			R:Print(format("Sold %d junk item(s) for %s%s. /rum buyback undoes the last sale.", sold,
-				R.FormatMoney(soldValue), stopped and " (sale stopped)" or ""))
-		end
-	end
-	local function step()
-		if not MerchantOpen() or merchantSession ~= session or InCombatLockdown() then return finish(true) end
-		for _ = 1, 10 do
-			i = i + 1
-			local it = list[i]
-			if not it then return finish(false) end
-			-- The sale runs over several ticks; re-check the slot so an item moved into
-			-- it since Collect() (or a stack that changed) is never sold by mistake.
-			local link, count, _, quality, locked, id, _, noValue = API.GetSlotInfo(it[1], it[2])
-			local inf = link and R.Items:Info(link)
-			id = id or (link and R.ItemID(link))
-			local e = { id = id, link = link, count = count, bag = it[1], slot = it[2],
-				info = inf, quality = inf and inf.quality or quality, lname = inf and inf.lname }
-			local protected = (R.settings.protectFavorites and R.db.favorites[id]) or R.Items:InSet(e)
-			if link == it[5] and (count or 1) == it[6] and not locked and not noValue
-				and inf and inf.sell > 0 and not protected and self:IsJunk(e) then
-				LogSale(it)
-				API.UseContainerItem(it[1], it[2])
-				sold = sold + 1
-				soldValue = soldValue + (it[3] or 0)
-			end
-		end
-	end
-	self.ticker = C_Timer.NewTicker(0.25, step)
-	step()
+ if not MerchantOpen() then R:Print("Open a merchant to sell junk."); return end
+ if self.ticker or InCombatLockdown() or R.Mover:Busy() then return end
+ if GetCursorInfo() then History("Stopped", nil, "Cursor Is Occupied"); R:Print("Put Down The Cursor Item Before Selling."); return end
+ if confirmed == true then confirmed = self.pendingSale end
+ local list, total
+ if type(confirmed) == "table" then
+  if confirmed ~= self.pendingSale or confirmed.session ~= merchantSession then return end
+  list, total = confirmed.list, confirmed.total; self.pendingSale = nil
+ else self.pendingSale = nil; list, total = self:Collect() end
+ if #list == 0 then History("Skipped", nil, "No Sellable Excess Junk"); R:Print("No junk to sell."); return end
+ if not confirmed and self:NeedsConfirm(list, total) then
+  self.pendingSale = { list = list, total = total, session = merchantSession }
+  StaticPopup_Show("RUMMAGE_SELL_CONFIRM", #list, R.FormatMoney(total), self.pendingSale); return
+ end
+ local session, i, sold, soldValue = merchantSession, 0, 0, 0
+ local state = { phase = "Next", waits = 0 }
+ self.saleState = state
+ local function finish(reason)
+  if self.ticker then self.ticker:Cancel(); self.ticker = nil end
+  if state.ownedCursor and state.item and CursorMatches(state.item) then ClearCursor() end
+  self.saleState, self.CancelSale = nil, nil
+  if reason then History("Stopped", state.item, reason) end
+  if sold > 0 then R:Print(format("Sold %d junk item(s) for %s (observed inventory change)%s.", sold, R.FormatMoney(soldValue), reason and "; stopped: " .. reason or "")) end
+  if reason and sold == 0 then R:Print("Sale Stopped: " .. reason) end
+  R:Fire("MOVER_CHANGED", false)
+ end
+ self.CancelSale = function() finish("Cancelled By Player") end
+ local function observeSale(it)
+  local _, totals = self:Inventory()
+  local money = GetMoney and GetMoney()
+  if API.GetSlotInfo(it[1], it[2]) == nil and (totals[it.id] or 0) == state.beforeTotal - it[6] then
+   if type(money) ~= "number" or type(state.beforeMoney) ~= "number" or money ~= state.beforeMoney + it.unitValue * it[6] then return end
+   LogSale({ it[1], it[2], it.unitValue * it[6], it[4], it[5], it[6] })
+   sold, soldValue = sold + 1, soldValue + it.unitValue * it[6]
+   History("Observed", it, "Expected Inventory Decrease And Vendor Money Gain Verified")
+   state.phase, state.item, state.waits = "Next", nil, 0
+   return true
+  end
+ end
+ local function step()
+  if not MerchantOpen() or session ~= merchantSession then return finish("Merchant Session Ended") end
+  if InCombatLockdown() then return finish("Entered Combat") end
+  if state.phase == "Cursor" then
+   local it = state.item
+   local link, count, _, _, sourceLocked = API.GetSlotInfo(it[1], it[2])
+   if GetCursorInfo() and not CursorMatches(it) then return finish("Cursor Identity Changed") end
+   if CursorMatches(it) and not sourceLocked and link == it[5] and count == it[6] - state.amount then
+    if API.GetSlotInfo(state.destination[1], state.destination[2]) then return finish("Split Destination Changed") end
+    state.ownedCursor = true
+    R.ActionHistory:Record("Split", "Requested", { itemID = it.id, link = it[5], count = state.amount, reason = "Place Split Stack In Empty Bag Slot" })
+    API.PickupContainerItem(state.destination[1], state.destination[2])
+    state.phase, state.waits = "Placement", 0
+   else state.waits = state.waits + 1; if state.waits > 12 then return finish("Split Was Not Acknowledged") end end
+   return
+  elseif state.phase == "Placement" then
+   local it = state.item
+   local link, count, _, _, locked = API.GetSlotInfo(state.destination[1], state.destination[2])
+   local source, remainder, _, _, sourceLocked = API.GetSlotInfo(it[1], it[2])
+   if GetCursorInfo() and not CursorMatches(it) then return finish("Cursor Identity Changed") end
+   if not GetCursorInfo() and not sourceLocked and source == it[5] and remainder == it[6] - state.amount and link == it[5] and count == state.amount and not locked then
+    R.ActionHistory:Record("Split", "Observed", { itemID = it.id, link = it[5], count = state.amount, reason = "Source And Destination Quantities Verified" })
+    state.ownedCursor = nil
+    state.item = { state.destination[1], state.destination[2], it.unitValue * state.amount, it[4], it[5], state.amount,
+     id = it.id, sellCount = state.amount, unitValue = it.unitValue, split = true }
+    state.phase, state.waits = "Validate", 0
+   else state.waits = state.waits + 1; if state.waits > 12 then return finish("Split Placement Was Not Acknowledged") end end
+   return
+  elseif state.phase == "Sale" then
+   if GetCursorInfo() then return finish("Cursor Is Occupied") end
+   if not observeSale(state.item) then state.waits = state.waits + 1; if state.waits > 12 then return finish("Sale Remains Unconfirmed") end; return end
+  elseif GetCursorInfo() then return finish("Cursor Is Occupied") end
+  for _ = 1, 10 do
+   if state.phase == "Next" then
+    i = i + 1; state.item = list[i]
+    if not state.item then return finish() end
+    state.phase = "Validate"
+   end
+   local it = state.item
+   local amount, reason = self:SaleAllowance(it)
+   if amount == 0 then History("Skipped", it, reason); state.phase, state.item = "Next", nil
+   elseif amount < it[6] then
+    local destination = not it.split and API.SplitContainerItem and FreeSplitSlot(it)
+    if not destination then
+     History("Skipped", it, it.split and "Reserve Changed After Split" or "Partial Stack Needs A Free Bag Slot And Split API")
+     state.phase, state.item = "Next", nil
+    else
+     state.amount, state.destination, state.waits = amount, destination, 0
+     R.ActionHistory:Record("Split", "Requested", { itemID = it.id, link = it[5], count = amount, reason = "Split Exact Approved Excess" })
+     API.SplitContainerItem(it[1], it[2], amount)
+     state.ownedCursor = CursorMatches(it) or nil
+     state.phase = "Cursor"; return
+    end
+   else
+    it.sellCount = it[6]
+    History("Requested", it, "Vendor Sale Requested; Awaiting Inventory Change")
+    local _, totals = self:Inventory()
+    state.beforeTotal, state.beforeMoney = totals[it.id] or 0, GetMoney and GetMoney()
+    API.UseContainerItem(it[1], it[2])
+    state.phase, state.waits = "Sale", 0
+    if not observeSale(it) then return end
+   end
+  end
+ end
+ self.ticker = C_Timer.NewTicker(0.25, step)
+ R:Fire("MOVER_CHANGED", true)
+ step()
 end
 
 -- Buyback shortcut. Matches the logged item link against the merchant's buyback
@@ -228,11 +397,15 @@ function Junk:Buyback(n)
 			local price = GetBuybackItemInfo and select(3, GetBuybackItemInfo(pick.index))
 			if not price or price <= budget then
 				local before = GetNumBuybackItems() or 0
+				R.ActionHistory:Record("Buyback", "Requested", { link = log[pick.log].link, count = log[pick.log].count, reason = "Merchant Buyback Requested" })
 				BuybackItem(pick.index)
 				requested = requested + 1
 				if price then budget = budget - price end
-				if (GetNumBuybackItems() or 0) < before then confirmedHits[#confirmedHits + 1] = pick.log end
-			end
+				if (GetNumBuybackItems() or 0) < before then
+					confirmedHits[#confirmedHits + 1] = pick.log
+					R.ActionHistory:Record("Buyback", "Observed", { link = log[pick.log].link, count = log[pick.log].count, reason = "Buyback List Decreased" })
+				end
+			else R.ActionHistory:Record("Buyback", "Skipped", { link = log[pick.log].link, reason = "Insufficient Funds" }) end
 		end
 		table.sort(confirmedHits, function(a, b) return a > b end)
 		for _, i in ipairs(confirmedHits) do table.remove(log, i) end
@@ -245,10 +418,12 @@ function Junk:Buyback(n)
 	for i = 1, GetNumBuybackItems() or 0 do
 		if GetBuybackItemLink(i) == want.link then
 			local price = GetBuybackItemInfo and select(3, GetBuybackItemInfo(i))
-			if price and price > GetMoney() then R:Print("Not enough money to buy that item back."); return end
+			if price and price > GetMoney() then R.ActionHistory:Record("Buyback", "Skipped", { link = want.link, reason = "Insufficient Funds" }); R:Print("Not enough money to buy that item back."); return end
 			local before = GetNumBuybackItems() or 0
+			R.ActionHistory:Record("Buyback", "Requested", { link = want.link, count = want.count, reason = "Merchant Buyback Requested" })
 			BuybackItem(i)
 			if (GetNumBuybackItems() or 0) < before then
+				R.ActionHistory:Record("Buyback", "Observed", { link = want.link, count = want.count, reason = "Buyback List Decreased" })
 				table.remove(log, n)
 				R:Print("Bought back " .. want.link .. ".")
 			else R:Print("Requested buyback of " .. want.link .. ". Sale remains in the log until confirmed.") end

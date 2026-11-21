@@ -15,7 +15,11 @@ local COL2 = 280
 local function S() return R.settings end
 -- Sliders fire OnValueChanged continuously while dragged; re-skinning the main window on
 -- every tick was the most expensive thing the options panel did. Coalesce to once per frame.
-local function DoRelayout() R:EachUI(function(w) w:ApplySkin() end); R:RequestRefresh() end
+local function DoRelayout()
+	R:EachUI(function(w) w:ApplySkin() end)
+	if R.Tools and R.Tools.frame and R.Tools.frame:IsShown() then R.Tools:Refresh(); R.Tools:ApplyPosition() end
+	R:RequestRefresh()
+end
 local function Relayout() R:Defer("optionsRelayout", DoRelayout) end
 
 local function Cycle(list, current, dir)
@@ -193,7 +197,8 @@ builders.general = function(p)
 	st:Check("Per-character profiles", "profilePerChar",
 		"On: each character automatically re-applies the profile last used on it at login.")
 	st:Check("Auto-switch profile by spec / zone", "autoProfile",
-		"Targets are set with /rum autoprofile set <spec1-4|dungeon|raid|battleground|arena|world> <profile>.")
+		"Use Context Profiles to select saved profiles for spec and instance types.")
+	st:Place(W:Button(p, "Context Profiles...", COL2 - 30, 20, function() R.Tools:Show("profiles") end), 20, 6)
 	st:Check("Remember window size and scale per view", "perViewSize",
 		"Bags, Bank and other characters each keep their own size and scale.")
 	st:Check("Keyboard navigation in the list", "keyboardNav",
@@ -261,7 +266,8 @@ builders.appearance = function(p)
 		"Level, class, armor and weapon proficiency and profession requirements (red text in the item's tooltip).")
 	st:Check("Quest-starter badges", "questBadges")
 	st:Check("Item level on grid icons", "gridItemLevel")
-	st:Check("Colourblind-safe quality tags", "colorblindCues", "Adds a short text tag ([Rare], [Epic]...) before item names.", Relayout)
+	st:Check("Colourblind-safe quality tags", "colorblindCues", "List Quality Tags And Grid F1–F8 Favorite, J Junk, Q0–Q7 Quality. Grid Icons Are At Least 40px When Enabled.", Relayout)
+	st:Note("Grid Legend: F1–F8 Favorite; J Junk; Q0 Poor, Q1 Common, Q2 Uncommon, Q3 Rare, Q4 Epic, Q5 Legendary, Q6 Artifact, Q7 Heirloom.")
 	st:Slider("Dim characters not seen for", "staleDays", 0, 90, 1, function(v) return v == 0 and "never" or (v .. " days") end)
 	return st
 end
@@ -295,11 +301,14 @@ builders.items = function(p)
 			}
 		end
 		if #rules < 8 then
-			items[#items + 1] = { text = "Add rule...", func = function() StaticPopup_Show("RUMMAGE_ADD_JUNK_RULE") end }
+			items[#items + 1] = { text = "Add rule...", func = function() R.Tools:Show("preview") end }
 		end
 		R.Widgets:Menu(btn, items)
 	end)
 	st:Place(rulesBtn, 20, 6)
+	st:Place(W:Button(p, "Preview A Junk Rule...", COL2 - 30, 20, function() R.Tools:Show("preview") end), 20, 4)
+	st:Place(W:Button(p, "Keep Quantities...", COL2 - 30, 20, function() R.Tools:Show("keep") end), 20, 4)
+	st:Place(W:Button(p, "Action History...", COL2 - 30, 20, function() R.Tools:Show("history") end), 20, 6)
 	st:Note("Items matching a rule count as junk. Favorites are never junk by rule; manual marks win. Example: q:poor ilvl<5")
 
 	st:Header("Values")
@@ -415,7 +424,7 @@ builders.categories = function(p)
 	local st = Stacker(p)
 	st:Header("Custom categories")
 	local rows = {}
-	local add
+	local add, help
 	local function build()
 		for _, r in ipairs(rows) do r:Hide() end
 		for i, def in ipairs(R.db.categories) do
@@ -465,14 +474,20 @@ builders.categories = function(p)
 		end
 		add:ClearAllPoints()
 		add:SetPoint("TOPLEFT", 12, -38 - #R.db.categories * 26)
+		help:ClearAllPoints()
+		help:SetPoint("TOPLEFT", add, "BOTTOMLEFT", 0, -10)
+		-- Help is a FontString, so GetChildren() cannot discover its lower edge.
+		local extent = 38 + #R.db.categories * 26 + 20 + 10 + help:GetStringHeight() + 16
+		st.contentHeight = extent
+		p.categoryExtent = extent
+		p:SetHeight(extent)
 	end
 	add = W:Button(p, "+ Add category", 120, 20, function()
 		R.Categories:AddCustom("New category", "")
 		build()
 		R:RequestRefresh()
 	end)
-	local help = W:Text(p, "small")
-	help:SetPoint("BOTTOMLEFT", 12, 12)
+	help = W:Text(p, "small")
 	help:SetWidth(WIDTH - 40)
 	help:SetWordWrap(true)
 	help:SetJustifyH("LEFT")
@@ -482,6 +497,7 @@ builders.categories = function(p)
 		"  type:consumable | #quest     consumables or quest items\n" ..
 		"  ilvl>=40 !#bound      unbound gear, item level 40+\n" ..
 		"  value>5g              anything worth over 5 gold at a vendor")
+	p.categoryHelp, p.categoryAdd, p.categoryRows, p.categoryRebuild = help, add, rows, build
 	build()
 	return st
 end
@@ -496,13 +512,13 @@ builders.about = function(p)
 	st:Header("Keybinds")
 	st:Note("Routed to Rummage: " .. (R.Hooks:BoundKeys() or "none"))
 	st:Header("Slash commands")
-	st:Note("/rum  toggle bags\n/rum bank  toggle bank\n/rum guild  toggle guild bank\n/rum search <text>\n/rum config\n/rum restack\n/rum sell\n/rum buyback [n|all]\n/rum junklog\n/rum gold  ·  /rum mail  ·  /rum perf\n/rum inventory  ·  /rum apicheck [export]\n/rum conflicts\n/rum reset  (window position)\n/rum export · /rum import <string>")
+	st:Note("/rum  toggle bags\n/rum bank  toggle bank\n/rum guild  toggle guild bank\n/rum search <text>\n/rum config\n/rum restack\n/rum sell\n/rum buyback [n|all]\n/rum junklog · /rum history\n/rum gold  ·  /rum mail  ·  /rum perf\n/rum inventory  ·  /rum apicheck [export]\n/rum conflicts\n/rum reset  (window position)\n/rum export · /rum import <string>")
 	st:Header("Settings sharing")
 	local expB = W:Button(p, "Export settings...", COL2 - 30, 20, function() StaticPopup_Show("RUMMAGE_EXPORT_SETTINGS") end)
 	st:Place(expB, 20, 4)
 	local impB = W:Button(p, "Import settings...", COL2 - 30, 20, function() StaticPopup_Show("RUMMAGE_IMPORT_SETTINGS") end)
 	st:Place(impB, 20, 4)
-	st:Note("The string covers settings, columns, custom categories and auto-junk rules. Favorites, junk marks and character caches are not included.")
+	st:Note("The string covers settings, columns, custom categories, auto-junk rules, keep quantities and context profile mappings. Action history stays local; favorites, junk marks and character caches are not included.")
 	st:Header("Mouse")
 	st:Note("Alt+click item: cycle favorite marker\nAlt+right-click item: toggle junk\nClick a bag icon: show only that bag  ·  right-click: empty it\nDrag items onto empty list space to drop them in a free slot")
 	return st
@@ -617,7 +633,7 @@ function O:Show(tab)
 		page.stacker = builders[tab](content)
 		page.content = content
 		local st = page.stacker
-		content:SetHeight(math.max(10, math.max(-(st.y[0] or 0), -(st.y[1] or 0)) + 16))
+		content:SetHeight(math.max(10, math.max(-(st.y[0] or 0), -(st.y[1] or 0)) + 16, st.contentHeight or 0))
 		-- Some tabs place widgets outside the stacker (the column list): once laid out,
 		-- grow the content to the lowest child so nothing is unreachable.
 		if C_Timer and C_Timer.After then
@@ -644,30 +660,6 @@ end
 
 -- Entry in Blizzard's AddOns settings list
 function O:Init()
-	StaticPopupDialogs["RUMMAGE_ADD_JUNK_RULE"] = {
-		text = "Auto-junk rule (search syntax). Matching items count as junk:",
-		button1 = ACCEPT, button2 = CANCEL, hasEditBox = true, maxLetters = 120,
-		OnShow = function(self)
-			local eb = self.editBox or self.EditBox or (self.GetName and _G[self:GetName() .. "EditBox"])
-			if eb then eb:SetText(""); eb:SetFocus() end
-		end,
-		OnAccept = function(self)
-			local eb = self.editBox or self.EditBox or (self.GetName and _G[self:GetName() .. "EditBox"])
-			local q = eb and (eb:GetText() or ""):match("^%s*(.-)%s*$") or ""
-			if q ~= "" and #R.db.junkRules < 8 then
-				R.db.junkRules[#R.db.junkRules + 1] = q
-				R:RequestRefresh()
-				R:Print("Auto-junk rule added: " .. q)
-			end
-		end,
-		EditBoxOnEnterPressed = function(self)
-			local p = self:GetParent()
-			StaticPopupDialogs["RUMMAGE_ADD_JUNK_RULE"].OnAccept(p)
-			p:Hide()
-		end,
-		EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
-		timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
-	}
 
 	local panel = CreateFrame("Frame")
 	panel.name = "Rummage"
