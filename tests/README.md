@@ -2,6 +2,10 @@
 
 Offline tests: every addon file is loaded under **Lua 5.1** (via `lupa.lua51`) against a
 small fake WoW client (`wowstub.lua`) — a stub, not a game emulator.
+An installed Lua 5.1 executable can run the same suite without lupa: set `LUA51`
+to its full path, then run the commands below. An explicitly selected interpreter
+is required to report Lua 5.1 and failures do not fall back to another runtime.
+`tests/harness.lua` is shared by both runner paths.
 
     pip install lupa
     python3 -I tests/run.py        # compile all files + run tests/cases.lua

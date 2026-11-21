@@ -609,7 +609,7 @@ test("buyback all claims each buyback slot once and buys highest index first", f
   env.BuybackItem = function(i) calls[#calls + 1] = i end   -- server answers later: list unchanged
   R.Junk:Buyback("all")
   assert(#calls == 2 and calls[1] == 3 and calls[2] == 1, "calls " .. table.concat(calls, ","))
-  assert(#R.db.junkLog == 1 and R.db.junkLog[1].link == "[Rag]", "one unmatched Rag stays logged")
+  assert(#R.db.junkLog == 3, "unconfirmed requests must retain sale history")
 end)
 
 test("auto-repair uses guild funds only when the withdraw limit covers the cost", function()
@@ -1439,4 +1439,206 @@ test("added category items survive sanitize and export/import", function()
   R.db.categories = {}
   assert(R:ImportSettings(str) ~= false)
   assert(R.db.categories[1].items[10] and R.db.categories[1].items[11] and R.db.categories[2].items == nil)
+end)
+
+
+-- 1.11.1 audit regressions.
+test("window-owned entries survive another window and cross-character snapshots", function()
+  local env, R = boot()
+  local link = env.__addItem(0, 1, 1500, 2)
+  R.Data:ScanInventory()
+  local owner = R.UI
+  local entries = R.Items:Build(R.Data.me, "bags", owner)
+  local e, pair = entries[1], entries[1].slots[1]
+  e.vals.probe = 42
+  local other = { containers = { [0] = { size = 1, slots = { [1] = { l = "item:1501", i = 1501, c = 9 } } } } }
+  R.Items:Build(other, "bags", R.BankUI)
+  R.Items:Build(other, "bags", R.GuildUI)
+  R.UI:BuildAllChars("bags")
+  assert(entries[1] == e and e.link == link and e.count == 2 and e.vals.probe == 42)
+  assert(e.slots[1] == pair and pair[1] == 0 and pair[2] == 1)
+end)
+
+test("sale confirmation sells only the original unchanged snapshot", function()
+  local env, R = boot()
+  env.MerchantFrame.shown = true
+  env.__addItem(0, 1, 1510, 1, { quality = 2, sell = 10 }); R.db.junk[1510] = true
+  R.Junk:SellAll()
+  local sale = env.__popup.args[3]
+  env.__addItem(0, 2, 1511, 1, { quality = 2, sell = 20 }); R.db.junk[1511] = true
+  env.StaticPopupDialogs.RUMMAGE_SELL_CONFIRM.OnAccept(nil, sale)
+  assert(#env.__used == 1 and env.__used[1][2] == 1, "new item was not confirmed")
+end)
+
+test("sale ticks recheck count favorites sets junk and vendor value", function()
+  for _, kind in ipairs({ "count", "favorite", "set", "junk", "value", "combat", "session" }) do
+    local env, R = boot()
+    env.__bags[0].size = 12; env.MerchantFrame.shown = true
+    for i = 1, 11 do env.__addItem(0, i, 1520 + i, 1, { quality = 0, sell = 10 }) end
+    R.Junk:SellAll()
+    assert(#env.__used == 10)
+    if kind == "count" then env.__bags[0][11].count = 4
+    elseif kind == "favorite" then R.db.favorites[1531] = 1
+    elseif kind == "set" then R.Items.InSet = function(_, e) return e.id == 1531 end
+    elseif kind == "junk" then R.db.junk[1531] = false
+    elseif kind == "value" then
+      local get = R.API.GetSlotInfo
+      R.API.GetSlotInfo = function(b, slot)
+        local l, c, t, q, lock, id, bound = get(b, slot)
+        return l, c, t, q, lock, id, bound, slot == 11
+      end
+    elseif kind == "combat" then env.__combat = true
+    elseif kind == "session" then env.__ev("MERCHANT_CLOSED"); env.__ev("MERCHANT_SHOW") end
+    env.__tick(2)
+    assert(#env.__used == 10 and #R.db.junkLog == 10, kind .. " sold a changed item")
+  end
+end)
+
+test("sale prompt expires when the merchant session changes", function()
+  local env, R = boot(); env.MerchantFrame.shown = true
+  env.__addItem(0, 1, 1540, 1, { quality = 2, sell = 10 }); R.db.junk[1540] = true
+  R.Junk:SellAll(); local sale = env.__popup.args[3]
+  env.__ev("MERCHANT_CLOSED"); env.__ev("MERCHANT_SHOW")
+  env.StaticPopupDialogs.RUMMAGE_SELL_CONFIRM.OnAccept(nil, sale)
+  assert(not env.__used)
+end)
+
+local function mailTarget(env)
+  env.MailFrame = env.CreateFrame("Frame", "MailFrame"); env.MailFrame:Show()
+  env.SendMailFrame = env.CreateFrame("Frame", "SendMailFrame"); env.SendMailFrame:Show()
+  env.GetSendMailItem = function() return nil end
+  env.ClickSendMailItemButton = function() end
+end
+
+test("movers share busy state and preserve a user-owned cursor", function()
+  local env, R = boot(); mailTarget(env)
+  local link = env.__addItem(0, 1, 1550, 1)
+  local entries = { { link = link, slots = { { 0, 1 } } } }
+  local cleared = 0
+  env.GetCursorInfo = function() return "item", 999 end
+  env.ClearCursor = function() cleared = cleared + 1 end
+  R.Mover:Start(function() end, "test"); R.Mover:SendTo("mail", entries)
+  assert(not R.Mover:Busy() and cleared == 0 and not env.__picked)
+  env.GetCursorInfo = function() return nil end
+  R.Mover:Start(function() end, "test"); R.Mover:SendTo("mail", entries)
+  assert(R.Mover:IsShown() and not R.Mover.sendTicker)
+  R.Mover:Stop()
+  R.Mover:SendTo("mail", entries); R.Mover:Start(function() end, "test")
+  assert(R.Mover.sendTicker and not R.Mover:IsShown())
+  env.GetCursorInfo = function() return "item", 999 end
+  env.__tick(1)
+  assert(not R.Mover:Busy() and cleared == 0)
+end)
+
+test("transfer plans reject replacement and changed stacks and bank session loss", function()
+  local env, R = boot()
+  local link = env.__addItem(0, 1, 1560, 2)
+  env.__bags[1] = { size = 4 }
+  local planner = R.Mover:PlanTransfer({ { 0, 1 } }, { 1 })
+  env.__addItem(0, 1, 1561, 2)
+  assert(planner() == nil, "replacement moved")
+  env.__addItem(0, 1, 1560, 2)
+  planner = R.Mover:PlanTransfer({ { 0, 1 } }, { 1 })
+  env.__bags[0][1].count = 3
+  assert(planner() == nil, "changed stack moved")
+  env.__bags[-1] = { size = 4 }; R.Data.atBank = true
+  planner = R.Mover:PlanTransfer({ { 0, 1 } }, { -1 })
+  env.__ev("BANKFRAME_CLOSED"); R.Data.atBank = true
+  local move, err = planner()
+  assert(move == nil and err:find("session"))
+  local done = false
+  R.Mover:Start(planner, "test", function() done = true end)
+  env.__update(0.1)
+  assert(not R.Mover:Busy() and not done and not env.__picked)
+end)
+
+test("bank confirmation owns direction and source snapshot across window changes", function()
+  local env, R = boot()
+  local link = env.__addItem(0, 1, 1570, 2)
+  R.Data.atBank = true; R.UI:Open(); env.__settle(2)
+  R.UI.entries = { { link = link, bag = 0, slots = { { 0, 1 } } } }
+  R.UI:DoTransfer()
+  local transfer = env.__popup.args[3]
+  assert(transfer.toBank and transfer.window == R.UI)
+  R.popupUI = R.BankUI; R.UI.entries = {}; R.UI.view = "bank"
+  local captured
+  R.Mover.TransferEntries = function(_, entries, toBank, session) captured = { entries, toBank, session } end
+  env.StaticPopupDialogs.RUMMAGE_CONFIRM_TRANSFER.OnAccept(nil, transfer)
+  assert(captured[2] == true and captured[1][1].link == link and captured[1][1].slots[1][4] == 2)
+end)
+
+test("settings preserve section delimiters Unicode and explicit empty lists", function()
+  local env, R = boot()
+  R.db.categories = { { name = "One", query = "", section = " Équipement;=% " } }
+  R.db.junkRules = { "q:poor" }
+  local exported = R:ExportSettings()
+  R.db.categories = {}; assert(R:ImportSettings(exported))
+  assert(R.db.categories[1].section == "Équipement;=%")
+  R.db.categories = {}; R.db.junkRules = {}; exported = R:ExportSettings()
+  R.db.categories = { { name = "Old" } }; R.db.junkRules = { "old" }
+  assert(R:ImportSettings(exported) and #R.db.categories == 0 and #R.db.junkRules == 0)
+  R.db.categories = { { name = "Keep" } }; R.db.junkRules = { "keep" }
+  assert(R:ImportSettings("RUM1;scale=1"))
+  assert(R.db.categories[1].name == "Keep" and R.db.junkRules[1] == "keep")
+  assert(R:ImportSettings("RUM1;cat1.name=Legacy;cat1.query="))
+  assert(R.db.categories[1].section == "Custom")
+end)
+
+test("cached alt metadata and invalid saved anchors are repaired", function()
+  local env, R = boot(function(e)
+    e.RummageDB = { settings = { point = { "BAD", "CENTER", 0, 0 }, upgradePoint = { "TOP", "TOP", math.huge, 0 },
+      bank = { point = { "BAD", "CENTER", 0, 0 } }, guild = { point = { "CENTER", "CENTER", 0/0, 0 } } },
+      chars = { ["Broken-Realm"] = { name = {}, realm = false, class = {}, faction = {}, level = {}, lastSeen = "bad", acquired = { [1] = "bad", [2] = math.huge, [3] = 42 } } } }
+  end)
+  local c = R.db.chars["Broken-Realm"]
+  assert(c and not c.name and not c.realm and not c.class and not c.faction and not c.level and not c.lastSeen)
+  assert(c.acquired[1] == nil and c.acquired[2] == nil and c.acquired[3] == 42)
+  R.Data:SortedChars(); R.Data:CountFor(c, 1); R.UI:ShowCharMenu(R.UI.frame); R.UI:BuildAllChars("bags")
+  assert(not R.settings.point and not R.settings.upgradePoint)
+  assert(not R.BankUI:Geo().point and not R.GuildUI:Geo().point)
+  assert(R.ValidPoint({ "TOPLEFT", "BOTTOMRIGHT", -42, 99 }))
+end)
+
+test("deferred live and layout work coalesces independently for every window", function()
+  local env, R = boot()
+  local windows = { R.UI, R.BankUI, R.GuildUI }
+  local live, layouts = {}, {}
+  for i, w in ipairs(windows) do
+    w.frame:Show()
+    w.UpdateLiveNow = function() live[i] = (live[i] or 0) + 1 end
+    w.Layout = function() layouts[i] = (layouts[i] or 0) + 1 end
+    w:UpdateLive(); w:UpdateLive()
+    w.frame.scripts.OnSizeChanged(w.frame)
+    w.frame.scripts.OnSizeChanged(w.frame)
+  end
+  env.__update(0.1)
+  for i = 1, 3 do assert(live[i] == 1 and layouts[i] == 1, "window " .. i .. " lost/coalesced another's job") end
+end)
+
+test("failed or unaffordable buyback preserves history", function()
+  local env, R = boot(); env.MerchantFrame:Show()
+  R.db.junkLog = { { t = 1, link = "[Rag]", count = 1, value = 5 } }
+  env.__buyback = { { link = "[Rag]" } }
+  local calls = 0
+  env.BuybackItem = function() calls = calls + 1 end
+  R.Junk:Buyback(1)
+  assert(calls == 1 and #R.db.junkLog == 1 and chatHas(env, "Requested buyback"))
+  env.GetBuybackItemInfo = function() return "Rag", nil, 100, 1 end
+  env.GetMoney = function() return 5 end
+  R.Junk:Buyback(1); R.Junk:Buyback("all")
+  assert(calls == 1 and #R.db.junkLog == 1)
+end)
+
+
+test("a fresh sale invalidates an older pending confirmation", function()
+  local env, R = boot(); env.MerchantFrame:Show()
+  env.__addItem(0, 1, 1590, 1, { quality = 2, sell = 10 }); R.db.junk[1590] = true
+  R.Junk:SellAll(); local oldSale = env.__popup.args[3]
+  R.settings.sellConfirmQuality = false
+  R.Junk:SellAll(); env.__tick(2)
+  assert(#env.__used == 1)
+  env.__addItem(0, 1, 1590, 1, { quality = 2, sell = 10 })
+  env.StaticPopupDialogs.RUMMAGE_SELL_CONFIRM.OnAccept(nil, oldSale)
+  env.__tick(2)
+  assert(#env.__used == 1, "superseded confirmation sold a new item")
 end)

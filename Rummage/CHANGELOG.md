@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.11.1 — 2026-11-21
+
+**Fixed**
+- Bags, Bank and Guild Bank keep independent item entries and deferred layout/live updates.
+- Sale and bank-transfer confirmations retain the exact original items and direction; changed stacks, newly protected items, combat and closed interaction sessions stop unsafe actions.
+- Item movers share one busy state and preserve items already held on the cursor. Bank moves stop when the bank session ends.
+- Failed or unconfirmed buyback requests retain sale history; known unaffordable requests are skipped.
+- Settings export preserves custom category sections and empty category/rule lists. Older partial imports remain supported.
+- Damaged cached character metadata and invalid saved window anchors are repaired safely.
+
+**Verification**
+- Offline Lua 5.1 suite and static addon checks; live Forever action, taint and server acknowledgement checks remain required.
+- Tests can also use an explicitly selected installed Lua 5.1 interpreter (`LUA51`) without lupa.
+
 ## 1.11.0 — 2026-11-18
 
 Offline suite: 59 cases pass; not yet verified in game.

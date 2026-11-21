@@ -133,40 +133,59 @@ local function LogSale(it)
 	for i = #log, 31, -1 do log[i] = nil end
 end
 
+local merchantSession = 0
+
 function Junk:SellAll(confirmed)
 	if not MerchantOpen() then
 		R:Print("Open a merchant to sell junk.")
 		return
 	end
-	if self.ticker then return end
-	local list, total = self:Collect()
+	if self.ticker or InCombatLockdown() then return end
+	if confirmed == true then confirmed = self.pendingSale end -- legacy caller: only the pending snapshot
+	local list, total
+	if type(confirmed) == "table" then
+		if confirmed ~= self.pendingSale or confirmed.session ~= merchantSession then return end
+		list, total = confirmed.list, confirmed.total
+		self.pendingSale = nil
+	else
+		self.pendingSale = nil -- a fresh action supersedes any earlier confirmation
+		list, total = self:Collect()
+	end
 	if #list == 0 then
 		R:Print("No junk to sell.")
 		return
 	end
 	if not confirmed and self:NeedsConfirm(list, total) then
-		StaticPopup_Show("RUMMAGE_SELL_CONFIRM", #list, R.FormatMoney(total))
+		self.pendingSale = { list = list, total = total, session = merchantSession }
+		StaticPopup_Show("RUMMAGE_SELL_CONFIRM", #list, R.FormatMoney(total), self.pendingSale)
 		return
 	end
+	local session = merchantSession
 	local i = 0
 	local sold, soldValue = 0, 0
 	local function finish(stopped)
 		self.ticker:Cancel(); self.ticker = nil
 		if sold > 0 then
 			R:Print(format("Sold %d junk item(s) for %s%s. /rum buyback undoes the last sale.", sold,
-				R.FormatMoney(soldValue), stopped and " (merchant closed)" or ""))
+				R.FormatMoney(soldValue), stopped and " (sale stopped)" or ""))
 		end
 	end
 	local function step()
-		if not MerchantOpen() then return finish(true) end
+		if not MerchantOpen() or merchantSession ~= session or InCombatLockdown() then return finish(true) end
 		for _ = 1, 10 do
 			i = i + 1
 			local it = list[i]
 			if not it then return finish(false) end
 			-- The sale runs over several ticks; re-check the slot so an item moved into
 			-- it since Collect() (or a stack that changed) is never sold by mistake.
-			local link, _, _, _, locked = API.GetSlotInfo(it[1], it[2])
-			if link == it[5] and not locked then
+			local link, count, _, quality, locked, id, _, noValue = API.GetSlotInfo(it[1], it[2])
+			local inf = link and R.Items:Info(link)
+			id = id or (link and R.ItemID(link))
+			local e = { id = id, link = link, count = count, bag = it[1], slot = it[2],
+				info = inf, quality = inf and inf.quality or quality, lname = inf and inf.lname }
+			local protected = (R.settings.protectFavorites and R.db.favorites[id]) or R.Items:InSet(e)
+			if link == it[5] and (count or 1) == it[6] and not locked and not noValue
+				and inf and inf.sell > 0 and not protected and self:IsJunk(e) then
 				LogSale(it)
 				API.UseContainerItem(it[1], it[2])
 				sold = sold + 1
@@ -192,24 +211,32 @@ function Junk:Buyback(n)
 		-- Plan first, then buy. BuybackItem is answered by the server later, so the
 		-- list does not shrink between calls: each buyback index is claimed once, and
 		-- indices are bought highest first so earlier ones cannot shift underneath.
-		local claimed, picks, logHits = {}, {}, {}
+		local claimed, picks = {}, {}
 		local numBuyback = GetNumBuybackItems() or 0
 		for i = 1, #log do
 			for b = 1, numBuyback do
 				if not claimed[b] and GetBuybackItemLink(b) == log[i].link then
 					claimed[b] = true
-					picks[#picks + 1] = b
-					logHits[#logHits + 1] = i
+					picks[#picks + 1] = { index = b, log = i }
 					break
 				end
 			end
 		end
-		table.sort(picks, function(a, b) return a > b end)
-		for _, b in ipairs(picks) do BuybackItem(b) end
-		table.sort(logHits, function(a, b) return a > b end)
-		for _, i in ipairs(logHits) do table.remove(log, i) end
-		local bought = #picks
-		R:Print(bought > 0 and ("Bought back " .. bought .. " item(s).") or "Nothing from the log is in the merchant's buyback list.")
+		table.sort(picks, function(a, b) return a.index > b.index end)
+		local confirmedHits, requested, budget = {}, 0, GetMoney()
+		for _, pick in ipairs(picks) do
+			local price = GetBuybackItemInfo and select(3, GetBuybackItemInfo(pick.index))
+			if not price or price <= budget then
+				local before = GetNumBuybackItems() or 0
+				BuybackItem(pick.index)
+				requested = requested + 1
+				if price then budget = budget - price end
+				if (GetNumBuybackItems() or 0) < before then confirmedHits[#confirmedHits + 1] = pick.log end
+			end
+		end
+		table.sort(confirmedHits, function(a, b) return a > b end)
+		for _, i in ipairs(confirmedHits) do table.remove(log, i) end
+		R:Print(requested > 0 and ("Requested buyback of " .. requested .. " item(s). Unconfirmed sales remain in the log.") or "No matching affordable items in buyback.")
 		return
 	end
 	n = tonumber(n) or 1
@@ -217,9 +244,14 @@ function Junk:Buyback(n)
 	if not want then R:Print("No such sale in the log (/rum junklog)."); return end
 	for i = 1, GetNumBuybackItems() or 0 do
 		if GetBuybackItemLink(i) == want.link then
+			local price = GetBuybackItemInfo and select(3, GetBuybackItemInfo(i))
+			if price and price > GetMoney() then R:Print("Not enough money to buy that item back."); return end
+			local before = GetNumBuybackItems() or 0
 			BuybackItem(i)
-			table.remove(log, n)
-			R:Print("Bought back " .. want.link .. ".")
+			if (GetNumBuybackItems() or 0) < before then
+				table.remove(log, n)
+				R:Print("Bought back " .. want.link .. ".")
+			else R:Print("Requested buyback of " .. want.link .. ". Sale remains in the log until confirmed.") end
 			return
 		end
 	end
@@ -236,10 +268,12 @@ function Junk:PrintLog()
 end
 
 R:RegisterEvent("MERCHANT_SHOW", function()
+	merchantSession = merchantSession + 1
+	Junk.pendingSale = nil
 	Junk:AutoRepair()
 	if R.settings.autoSellJunk then
 		C_Timer.After(0.2, function() Junk:SellAll() end)
 	end
 	R:Fire("MERCHANT_CHANGED")
 end)
-R:RegisterEvent("MERCHANT_CLOSED", function() R:Fire("MERCHANT_CHANGED") end)
+R:RegisterEvent("MERCHANT_CLOSED", function() merchantSession = merchantSession + 1; Junk.pendingSale = nil; R:Fire("MERCHANT_CHANGED") end)
