@@ -258,8 +258,25 @@ end
 function W:Text(parent, font, layer)
 	local fs = parent:CreateFontString(nil, layer or "OVERLAY")
 	fs:SetFontObject(self.fonts[font or "normal"])
+	fs.rummageFontKind = font or "normal"
 	fs:SetWordWrap(false)
 	return fs
+end
+
+-- Measure intrinsic text, never the clipped display region's current width.
+function W:MeasureText(text)
+ if type(text.GetUnboundedStringWidth) == "function" then
+  local ok, width = pcall(text.GetUnboundedStringWidth, text)
+  if ok and type(width) == "number" and width == width and (width > 0 or text:GetText() == "") and width < math.huge then return width end
+ end
+ if not self.measureText then
+  self.measureText = UIParent:CreateFontString(nil, "OVERLAY")
+  self.measureText:SetWordWrap(false); self.measureText:Hide()
+ end
+ local probe = self.measureText
+ probe:SetFontObject(self.fonts[text.rummageFontKind or "normal"])
+ probe:SetText(text:GetText() or "")
+ return probe:GetStringWidth()
 end
 
 ---------------------------------------------------------------------------
@@ -316,7 +333,7 @@ function W:Button(parent, label, width, height, onClick)
 	function b:SetActive(v) self.active = v; ButtonColors(self) end
 	function b:SetDisabledLook(v) self.disabled = v; ButtonColors(self) end
 	function b:SetLabel(t) if self.text then self.text:SetText(t) end end
-	function b:FitText(pad) if self.text then self:SetWidth(self.text:GetStringWidth() + (pad or 16)) end end
+	function b:FitText(pad) if self.text then self:SetWidth(W:MeasureText(self.text) + (pad or 16)) end end
 	ButtonColors(b)
 	buttons[#buttons + 1] = b
 	return b
@@ -505,7 +522,7 @@ function W:Menu(anchor, items, point, relPoint, x, y)
 		b:SetPoint("TOPLEFT", 4, y0)
 		b:SetPoint("RIGHT", menu, "RIGHT", -4, 0)
 		b:Show()
-		width = math.max(width, b.text:GetStringWidth() + 48)
+		width = math.max(width, W:MeasureText(b.text) + 48)
 		y0 = y0 - lineHeight
 	end
 	width = math.min(width, math.max(120, UIParent:GetWidth() - 24))

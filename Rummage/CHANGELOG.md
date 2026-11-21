@@ -10,12 +10,16 @@
 - **Grid Text Cues**: existing colourblind cues now show F1–F8 favorite, J junk and Q0–Q7 quality alongside the existing shapes. Effective grid size grows with font size while enabled (minimum 48 px); saved size and setting-off appearance are preserved.
 
 **Fixed**
+- Accept Forever's locked original stack count while a split is held on the cursor; verify exact source/destination counts after placement before selling.
+- Saving or removing a Keep Quantity invalidates the previous rule preview and consent while preserving the draft query.
 - Category help follows the Add button and scroll content grows and shrinks with the category list.
+- Button widths use intrinsic, unconstrained text measurements so large labels cannot stay clipped to their previous bounds.
+- Large-text Bags/Bank/Guild headers wrap measured controls, and footers separate actions from bounded metadata without changing saved outer window geometry. Normal compact text retains its existing layout.
 - Tools controls, rows and menus adapt to supported font sizes; dense lists use fewer paged rows when large text needs space.
 - Keep quantities and context mappings round-trip with explicit empty-list markers; malformed imports reject atomically. Existing partial exports remain compatible. History stays local and outside profiles/exports.
 
 **Verification**
-- 98 offline Lua 5.1 cases pass, including stateful delayed/rejected inventory requests and font/viewport bounds. Mock checks do not establish real client taint, protected action, server or accessibility behavior.
+- 104 offline Lua 5.1 cases pass, including stateful delayed/rejected inventory requests and font/viewport bounds. Mock checks do not establish real client taint, protected action, server or accessibility behavior.
 
 ## 1.11.1 — 2026-11-21
 

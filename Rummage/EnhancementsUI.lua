@@ -178,6 +178,10 @@ function Tools:SaveKeep(remove)
 	local count = remove and 0 or tonumber(Trim(self.keepCount:GetText()))
 	local ok, err = R.Junk:SetKeep(id, count)
 	self.keepMessage = ok and (remove and "Reserve Removed" or "Reserve Saved") or (err or "Enter A Valid Item ID And Whole Quantity")
+	if ok then
+		self.previewError = "Keep Quantities Changed. Preview This Query Again Before Enabling It."
+		self:InvalidatePreview()
+	end
 	self:Refresh()
 end
 
@@ -351,7 +355,7 @@ function Tools:Refresh()
 		local resolved = "None"
 		for _, key in ipairs(R.Extras:ContextKeys()) do
 			local name = R.db.contextProfiles[key]
-			if name and R.db.profiles[name] then resolved = key .. " → " .. name; break end
+			if name and R.db.profiles[name] then resolved = key .. " -> " .. name; break end
 		end
 		local any = next(R.db.profiles) ~= nil
 		self:SetStatus((self.profileMessage and (self.profileMessage .. "\n") or "") .. (not any and "No Profiles: Save A Profile In General Settings First.\n" or "") .. "Instance Type Wins, Then Spec, Then World Outside Instances.\nCurrent: " .. resolved .. (InCombatLockdown() and " — Switching Waits For Combat To End." or ""))

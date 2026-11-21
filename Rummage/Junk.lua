@@ -304,7 +304,11 @@ function Junk:SellAll(confirmed)
    local it = state.item
    local link, count, _, _, sourceLocked = API.GetSlotInfo(it[1], it[2])
    if GetCursorInfo() and not CursorMatches(it) then return finish("Cursor Identity Changed") end
-   if CursorMatches(it) and not sourceLocked and link == it[5] and count == it[6] - state.amount then
+   -- Forever keeps the original source count locked while a split is on the
+   -- cursor. Other clients report the remainder immediately. Placement still
+   -- has to prove the exact remainder and split quantity before any sale.
+   local sourceExpected = count == it[6] - state.amount or (sourceLocked and count == it[6])
+   if CursorMatches(it) and link == it[5] and sourceExpected then
     if API.GetSlotInfo(state.destination[1], state.destination[2]) then return finish("Split Destination Changed") end
     state.ownedCursor = true
     R.ActionHistory:Record("Split", "Requested", { itemID = it.id, link = it[5], count = state.amount, reason = "Place Split Stack In Empty Bag Slot" })

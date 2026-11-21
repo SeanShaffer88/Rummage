@@ -198,11 +198,83 @@ function UI:UpdateBagBar()
 	local _ = interactive
 end
 
+-- Separate action and metadata lanes only when the compact chrome is crowded.
+function UI:LayoutFooter(buttons, busy)
+ local responsive = self:ResponsiveChrome()
+ local control = responsive and math.max(22, R.settings.fontSize + 8) or 22
+ local available = math.max(1, self.frame:GetWidth() - W:Pad() * 2 - 28)
+ local defaults = { [self.btnSell] = 74, [self.btnRestack] = 60, [self.btnSort] = 46, [self.btnTransfer] = 70 }
+ local right, row, prev = available, 0, nil
+ local bounds = {}
+ for i = #buttons, 1, -1 do
+  local b = buttons[i]
+  local width = responsive and math.min(available, math.max(defaults[b], W:MeasureText(b.text) + 16)) or defaults[b]
+  self:FitChromeButton(b, width, control); b:ClearAllPoints()
+  if responsive then
+   if right - width < 0 then row = row + 1; right = available end
+   right = right - width
+   b:SetPoint("BOTTOMLEFT", self.footer, "BOTTOMLEFT", right, row * (control + 4))
+   bounds[#bounds + 1] = { left = right, right = right + width, row = row }
+   right = right - 4
+  else
+   if prev then b:SetPoint("RIGHT", prev, "LEFT", -4, 0) else b:SetPoint("RIGHT", self.footer, "RIGHT", 0, 0) end
+   right = right - width - 4
+  end
+  b:SetDisabledLook(busy); prev = b
+ end
+ local actionHeight = #buttons > 0 and ((row + 1) * control + row * 4) or 0
+ local line = math.max(22, R.settings.fontSize + 4)
+ local newHeight = responsive and actionHeight + line + 4 + W:Pad() * 2 or R.UIK.FOOTER_H
+ local changed = (self.chromeFooterHeight or R.UIK.FOOTER_H) ~= newHeight
+ self.chromeFooterHeight = newHeight; self.footer:SetHeight(newHeight - W:Pad())
+ if not responsive then
+  self.moneyBtn:ClearAllPoints(); self.moneyBtn:SetPoint("LEFT", 2, 0); self.moneyBtn:SetHeight(20)
+  self.moneyBtn.text:SetSize(math.max(1, self.moneyBtn:GetWidth() - 4), 20)
+  self.freeText:ClearAllPoints(); self.freeText:SetPoint("LEFT", self.moneyBtn, "RIGHT", 6, 0)
+  self.freeText:SetSize(W:MeasureText(self.freeText), line)
+  self.bagBar:ClearAllPoints(); self.bagBar:SetPoint("LEFT", self.freeText, "RIGHT", 8, 0)
+  local previous = self.bagBar
+  for _, field in ipairs({ self.cachedText, self.totalText, self.currencyText }) do
+   field:ClearAllPoints(); field:SetPoint("LEFT", previous, "RIGHT", previous == self.bagBar and 8 or 10, 0)
+   field:SetSize(W:MeasureText(field), line); field:SetWordWrap(false); previous = field
+  end
+  self.chromeFooterGeometry = { available = available, rows = 1, actionsHeight = control, metadataY = 0, buttons = {} }
+  if changed then R:Defer("chromeFooter" .. self.suffix, function() if UI.frame:IsShown() then UI:LayoutIfChanged() end end) end
+  return
+ end
+ local metadataWidth = responsive and available or math.max(1, right - 4)
+ local y = responsive and actionHeight + 6 or 3
+ local x = 2
+ local moneyWidth = math.min(math.max(60, W:MeasureText(self.moneyBtn.text) + 4), math.max(60, metadataWidth * 0.24))
+ self.moneyBtn:ClearAllPoints(); self.moneyBtn:SetPoint("BOTTOMLEFT", self.footer, "BOTTOMLEFT", x, y)
+ self.moneyBtn:SetSize(moneyWidth, line)
+ self.moneyBtn.text:SetWordWrap(false); self.moneyBtn.text:SetSize(math.max(1, moneyWidth - 4), line)
+ x = x + moneyWidth + 6
+ local freeWidth = math.min(W:MeasureText(self.freeText), math.max(50, metadataWidth * 0.22))
+ self.freeText:ClearAllPoints(); self.freeText:SetPoint("BOTTOMLEFT", self.footer, "BOTTOMLEFT", x, y)
+ self.freeText:SetSize(freeWidth, line); self.freeText:SetWordWrap(false); x = x + freeWidth + 8
+ self.bagBar:ClearAllPoints(); self.bagBar:SetPoint("BOTTOMLEFT", self.footer, "BOTTOMLEFT", x, y)
+ x = x + self.bagBar:GetWidth() + 8
+ local active = 0
+ local fields = { self.cachedText, self.totalText, self.currencyText }
+ for _, field in ipairs(fields) do if field:GetText() ~= "" then active = active + 1 end end
+ local remaining = math.max(0, metadataWidth - x)
+ for _, field in ipairs(fields) do
+  local width = field:GetText() ~= "" and math.max(1, math.floor(remaining / math.max(1, active))) or 1
+  field:ClearAllPoints(); field:SetPoint("BOTTOMLEFT", self.footer, "BOTTOMLEFT", math.min(x, metadataWidth - 1), y)
+  field:SetSize(width, line); field:SetWordWrap(false)
+  if field:GetText() ~= "" then x = x + width end
+ end
+ self.chromeFooterGeometry = { available = available, rows = row + 1, actionsHeight = actionHeight,
+  metadataY = y, metadataWidth = metadataWidth, buttons = bounds }
+ if changed then R:Defer("chromeFooter" .. self.suffix, function() if UI.frame:IsShown() then UI:LayoutIfChanged() end end) end
+end
+
 function UI:UpdateFooter()
 	if not self.frame or not self.frame:IsShown() then return end
 	local c = self:Char()
 	self.moneyBtn.text:SetText(R.FormatMoney(c.money or 0) ~= "" and R.FormatMoney(c.money or 0) or "0")
-	self.moneyBtn:SetWidth(math.max(60, self.moneyBtn.text:GetStringWidth() + 4))
+	self.moneyBtn:SetWidth(math.max(60, W:MeasureText(self.moneyBtn.text) + 4))
 	local list = self:BagList()
 	local free, total = R.Data:FreeSlots(c, list)
 	self.freeText:SetText(format(R.L.freeFmt, free, total))
@@ -268,15 +340,7 @@ function UI:UpdateFooter()
 		else self.btnTransfer:SetLabel(self.view == "bank" and R.L.toBags or R.L.toBank) end
 		buttons[#buttons + 1] = self.btnTransfer
 	end
-	local busy = R.Mover:Busy()
-	local prev
-	for i = #buttons, 1, -1 do
-		local b = buttons[i]
-		b:ClearAllPoints()
-		if prev then b:SetPoint("RIGHT", prev, "LEFT", -4, 0) else b:SetPoint("RIGHT", self.footer, "RIGHT", 0, 0) end
-		b:SetDisabledLook(busy)
-		prev = b
-	end
+	self:LayoutFooter(buttons, R.Mover:Busy())
 end
 
 function UI:ShowMoneyTooltip(anchor)

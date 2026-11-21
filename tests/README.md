@@ -25,7 +25,7 @@ and every slash command running without a Lua error.
 What is **not** covered: real client behaviour. The stub fakes geometry for UIParent-anchored
 frames only, has no taint, no real combat lockdown on protected buttons, and no real secret
 values (tests simulate `issecretvalue`). Items marked *Unverified* in `Rummage/CHANGELOG.md`
-need a live check on Forever 1.60.1.70938.
+need separate live checks on the declared Forever target (currently 1.60.1.71037).
 
 Adding a test: append `test("name", function() local env, R = boot() ... end)` to
 `cases.lua`. `env.__combat`, `env.__cursor`, `env.__shift`, `env.__now`, `env.__bags`,

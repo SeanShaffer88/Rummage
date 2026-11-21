@@ -1662,7 +1662,8 @@ local function inventoryModel(env, R, options)
   if h and h.source then
    local bag, slot = h.source[1], h.source[2]
    local s = env.__bags[bag][slot]
-   if s and s.link == h.link then s.count = s.count + h.count; model.held = nil
+   if h.deferred and s and s.link == h.link then s.locked = nil; model.held = nil
+   elseif s and s.link == h.link then s.count = s.count + h.count; model.held = nil
    elseif not s then env.__bags[bag][slot] = { link = h.link, id = h.id, count = h.count, quality = h.quality }; model.held = nil end
   end
  end
@@ -1672,8 +1673,8 @@ local function inventoryModel(env, R, options)
   request(function()
    local s = env.__bags[bag][slot]
    if not model.held and s and s.count > count then
-    s.count = s.count - count
-    model.held = { link = s.link, id = s.id, count = count, quality = s.quality, source = { bag, slot } }
+    if options.deferredSourceCount then s.locked = true else s.count = s.count - count end
+    model.held = { link = s.link, id = s.id, count = count, quality = s.quality, source = { bag, slot }, deferred = options.deferredSourceCount }
    end
   end)
  end
@@ -1684,6 +1685,10 @@ local function inventoryModel(env, R, options)
    local s = env.__bags[bag][slot]
    if model.held and not s then
     local h = model.held
+    if h.deferred then
+     local source = env.__bags[h.source[1]][h.source[2]]
+     source.count, source.locked = source.count - h.count, nil
+    end
     env.__bags[bag][slot] = { link = h.link, id = h.id, count = h.count, quality = h.quality }
     model.held = nil
    elseif not model.held and s then
@@ -2123,4 +2128,117 @@ test("grid and menus remain bounded at font24 with full text preserved", functio
  for _, child in ipairs(menu.children) do if child.text and child.text:GetText() == text then button = child end end
  assert(button and button:GetHeight() >= 30 and button.text:GetHeight() >= 30)
  button.scripts.OnClick(button, "LeftButton"); assert(clicked and not menu:IsShown())
+end)
+
+
+test("Keep Save and Remove invalidate preview consent while preserving draft query", function()
+ local env, R = boot()
+ env.__addItem(0, 1, 2589, 20, { name = "Linen Cloth", quality = 0, sell = 13 })
+ env.__addItem(0, 2, 2589, 16, { name = "Linen Cloth", quality = 0, sell = 13 })
+ R.Tools:Show("preview"); R.Tools.queryBox:SetText("linen cloth"); R.Tools:RunPreview()
+ assert(R.Tools.preview.sellUnits == 36)
+ R.Tools:Show("keep"); R.Tools.keepID:SetText("2589"); R.Tools.keepCount:SetText("35"); R.Tools:SaveKeep(false)
+ assert(not R.Tools.preview and R.Tools.queryBox:GetText() == "linen cloth" and R.Tools.enableButton.disabled)
+ R.Tools:Show("preview"); R.Tools:EnablePreview(); assert(#R.db.junkRules == 0)
+ R.Tools:RunPreview(); assert(R.Tools.preview.sellUnits == 1 and R.Tools.preview.retainedUnits == 35)
+ R.Tools:Show("keep"); R.Tools:SaveKeep(true)
+ assert(not R.Tools.preview and R.Tools.queryBox:GetText() == "linen cloth" and R.Tools.enableButton.disabled)
+ R.Tools:Show("preview"); R.Tools:RunPreview(); assert(R.Tools.preview.sellUnits == 36)
+end)
+
+
+test("Forever locked original source count commits on split placement before selling one excess unit", function()
+ local env, R = boot(); env.MerchantFrame:Show()
+ env.__addItem(0, 1, 2589, 16, { name = "Linen Cloth", quality = 0, sell = 13, stack = 20 })
+ env.__addItem(0, 2, 2589, 20, { name = "Linen Cloth", quality = 0, sell = 13, stack = 20 })
+ local model = inventoryModel(env, R, { deferredSourceCount = true })
+ R.Junk:SetKeep(2589, 35); local before = env.GetMoney(); R.Junk:SellAll()
+ assert(env.__bags[0][1].count == 16 and env.__bags[0][1].locked and model.held.count == 1 and model.calls.sale == 0)
+ model:tick(10)
+ local _, totals = R.Junk:Inventory()
+ assert(totals[2589] == 35 and env.__bags[0][1].count == 15 and not env.__bags[0][1].locked)
+ assert(env.GetMoney() == before + 13 and model.calls.sale == 1 and #R.db.junkLog == 1 and R.db.junkLog[1].count == 1)
+ assert(historyHas(R, "Sale", "Observed") and not R.Junk.ticker)
+end)
+
+test("Forever deferred source counts never sell on rejected placement or changed cursor", function()
+ for _, mode in ipairs({ "reject", "cursor" }) do
+  local env, R, model = reserveFixture({ deferredSourceCount = true, rejectPlace = mode == "reject" })
+  local before = env.GetMoney(); R.Junk:SellAll()
+  if mode == "cursor" then model.held = { id = 9999, link = "item:9999", count = 1 } end
+  model:tick(20)
+  assert(model.calls.sale == 0 and #R.db.junkLog == 0 and env.GetMoney() == before and not R.Junk.ticker)
+  assert(env.__bags[0][1].count == 20)
+  if mode == "reject" then assert(model.calls.clear == 1 and not model.held and not env.__bags[0][1].locked)
+  else assert(model.calls.clear == 0 and model.held.id == 9999) end
+ end
+end)
+
+
+test("large-text window chrome wraps measured controls without changing saved outer geometry", function()
+ local env, R = boot(); env.MerchantFrame:Show(); R.Data.atBank = true
+ local windows = { R.UI, R.BankUI, R.GuildUI }
+ for _, ui in ipairs(windows) do
+  ui:Open(); ui.frame:SetSize(680, 500)
+  local buttons = { ui.tabBags, ui.tabBank, ui.allBtn, ui.viewBtn, ui.presetBtn, ui.btnSell, ui.btnSort, ui.btnRestack, ui.btnTransfer }
+  if ui.tabGuild then buttons[#buttons + 1] = ui.tabGuild end
+  if ui.tabGuildToggle then buttons[#buttons + 1] = ui.tabGuildToggle end
+  for _, button in ipairs(buttons) do button.text.GetStringWidth = function(text) return #text:GetText() * R.settings.fontSize * 0.6 end end
+  R.settings.fontSize = 24; R.Widgets:UpdateFonts(); ui:Layout()
+  local header, footer = ui.chromeHeaderGeometry, ui.chromeFooterGeometry
+  assert(header.rows == 2 and header.controlHeight >= 32 and header.searchWidth > 80)
+  assert(ui:HeaderHeight() > 34 and ui:FooterHeight() >= 34 and ui.frame:GetWidth() == 680 and ui.frame:GetHeight() == 500)
+  local _, relative, _, _, contentTop = ui.content:GetPoint()
+  if relative == ui.sidebar then _, _, _, _, contentTop = ui.sidebar:GetPoint() end
+  assert(-contentTop >= ui:HeaderHeight(), "content starts below wrapped header")
+  for i, b in ipairs(footer.buttons) do
+   assert(b.left >= 0 and b.right <= footer.available)
+   for j, c in ipairs(footer.buttons) do if i ~= j and b.row == c.row then assert(b.right <= c.left or c.right <= b.left) end end
+  end
+  assert(footer.metadataY > footer.actionsHeight, "metadata is separate from actions")
+  assert(ui.btnRestack.text:GetWidth() <= ui.btnRestack:GetWidth() - 12)
+  ui.frame:SetWidth(400); ui:Layout()
+  assert(ui.chromeHeaderGeometry.rows >= 2 and ui.chromeHeaderGeometry.searchWidth > 80)
+  assert(ui.frame:GetWidth() == 400)
+  R.settings.fontSize = 12; ui.frame:SetWidth(680); R.Widgets:UpdateFonts(); ui:Layout()
+  assert(ui.chromeHeaderGeometry.rows == 1 and ui:HeaderHeight() == 34 and ui:FooterHeight() == 34)
+  assert(ui.viewBtn:GetWidth() == 44 and ui.presetBtn:GetWidth() == 52 and ui.btnSort:GetWidth() == 46)
+ end
+end)
+
+test("responsive chrome preserves view and cross-character toggle callbacks and metadata tooltips", function()
+ local env, R = boot(); open(env, R)
+ R.settings.fontSize = 24; R.UI:Layout()
+ local before = R.settings.viewMode
+ R.UI.viewBtn.scripts.OnClick(R.UI.viewBtn, "LeftButton")
+ assert(R.settings.viewMode ~= before)
+ before = R.settings.searchAllChars
+ R.UI.allBtn.scripts.OnClick(R.UI.allBtn, "LeftButton")
+ assert(R.settings.searchAllChars ~= before)
+ for _, field in ipairs({ R.UI.freeText, R.UI.cachedText, R.UI.totalText, R.UI.currencyText }) do
+  assert(field.tipFrame and field.tipFrame.scripts.OnEnter and field:GetHeight() >= 28)
+ end
+end)
+
+
+test("chrome sizing measures intrinsic labels instead of feedback from clipped regions", function()
+ local env, R = boot(); open(env, R); env.MerchantFrame:Show(); R.Data.atBank = true
+ R.settings.fontSize = 24; R.Widgets:UpdateFonts()
+ local buttons = { R.UI.tabBags, R.UI.tabBank, R.UI.tabGuildToggle, R.UI.allBtn, R.UI.viewBtn, R.UI.presetBtn, R.UI.btnSell, R.UI.btnRestack, R.UI.btnSort, R.UI.btnTransfer }
+ for _, b in ipairs(buttons) do
+  b.text.GetUnboundedStringWidth = false -- exercise legacy client fallback
+  b.text.GetStringWidth = function(text) return math.min(text:GetWidth(), #text:GetText() * 23 * 0.6) end
+ end
+ -- The one unconstrained probe follows the real font's intrinsic glyph widths.
+ local probe = R.Widgets.measureText
+ assert(probe)
+ probe.GetStringWidth = function(text) return #text:GetText() * 23 * 0.6 end
+ R.UI:Layout()
+ for _, b in ipairs(buttons) do assert(b:GetWidth() >= #b.text:GetText() * 23 * 0.6 + 16, b.text:GetText() .. " remains clipped") end
+ assert(R.UI.chromeHeaderGeometry.rows == 2 and R.UI.chromeHeaderGeometry.searchWidth > 80)
+ local source = R.UI.tabBank.text
+ source.GetUnboundedStringWidth = function() return 75 end
+ assert(R.Widgets:MeasureText(source) == 75)
+ source.GetUnboundedStringWidth = function() error("unsupported runtime call") end
+ assert(R.Widgets:MeasureText(source) == #source:GetText() * 23 * 0.6)
 end)
