@@ -118,12 +118,17 @@ function B:Availability(historyID)
  if not integer(money) or money < candidate.value then return false, "Insufficient Funds" end
  return true, nil
 end
+local function vendorFact(op, status, sale, reason)
+ if R.VendorSession then R.VendorSession:Record("Buyback", status, { session = op.vendorSession,
+  operationID = "buyback:" .. op.serial .. ":" .. (sale and sale.id or "stop"), saleLedgerID = sale and sale.id,
+  link = sale and sale.link, itemID = sale and R.ItemID(sale.link), count = sale and sale.count, value = sale and sale.value, reason = reason }) end
+end
 function B:Stop(reason, expected)
  local op = self.operation
  if not op or (expected and expected ~= op) then return end
  self.operation = nil
  if op.ticker then op.ticker:Cancel() end
- if reason then R.ActionHistory:Record("Buyback", "Stopped", { link = op.current and op.current.link, saleLedgerID = op.current and op.current.id, reason = reason }) end
+ if reason then vendorFact(op, "Stopped", op.current, reason); R.ActionHistory:Record("Buyback", "Stopped", { link = op.current and op.current.link, saleLedgerID = op.current and op.current.id, reason = reason }) end
  R:Fire("MOVER_CHANGED", false); R:Fire("BUYBACK_CHANGED")
 end
 function B:Check(op, fromTicker)
@@ -140,6 +145,8 @@ function B:Check(op, fromTicker)
    local current = ledger(p.sale.id)
    if current ~= p.ledger then return self:Stop("Sale Ledger Changed While Pending", op) end
    for i, e in ipairs(R.db.junkLog) do if e == current then table.remove(R.db.junkLog, i); break end end
+   op.pending = nil
+   vendorFact(op, "Observed", p.sale, "Exact Buyback Evidence Verified")
    R.ActionHistory:Record("Buyback", "Observed", { link = p.sale.link, count = p.sale.count, value = p.sale.value,
     saleLedgerID = p.sale.id, reason = "Exact Buyback Signature, Inventory Gain And Money Loss Verified" })
    if self.operation ~= op or self.session ~= op.session then return end
@@ -167,6 +174,7 @@ function B:Check(op, fromTicker)
    local snapshot = { id = sale.id, link = sale.link, count = sale.count, value = sale.value }
    op.current = sale
    op.pending = { sale = snapshot, ledger = sale, matches = candidate.matches, money = money, owned = owned, waits = 0 }
+   vendorFact(op, "Requested", sale, "Awaiting Buyback Evidence")
    R.ActionHistory:Record("Buyback", "Requested", { link = sale.link, count = sale.count, value = sale.value, saleLedgerID = sale.id, reason = "Awaiting Buyback, Inventory And Money Changes" })
    if self.operation ~= op or self.session ~= op.session then return end
    local interruption = blocked(); if interruption then return self:Stop(interruption, op) end
@@ -189,7 +197,8 @@ function B:Start(ids)
  local reason = blocked()
  if reason then return false, reason end
  if R.Mover:Busy() then return false, "Another Inventory Operation Is Busy" end
- local op = { ids = ids, index = 0, session = self.session }
+ self.serial = (self.serial or 0) + 1
+ local op = { ids = ids, index = 0, session = self.session, serial = self.serial, vendorSession = R.VendorSession and R.VendorSession:Token() }
  self.operation = op
  op.ticker = C_Timer.NewTicker(0.15, function() B:Check(op, true) end)
  R:Fire("MOVER_CHANGED", true)

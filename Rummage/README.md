@@ -172,3 +172,12 @@ With Colourblind-Safe Quality Tags enabled, grid cells add F1–F8 (favorite), J
 
 
 Observed Sale rows in History now have **Buy Back** actions. Open the merchant and hover a disabled action for its reason. The action always re-resolves the exact link, stack quantity and price; unknown or ambiguous older records stay unavailable. A pending request blocks other inventory automation, and closing/reopening the merchant, combat or a cursor interruption stops it safely. History clearing does not remove the independent sale ledger.
+
+
+## Planning And Diagnostics
+
+Open **Planning And Diagnostics** in General settings or `/rum plan [restock|rules|vendor|forecast]`. Tools keeps its existing four tabs.
+
+Restock targets are shared account-wide; counts and withdrawals always concern the current character's bags and open live character bank. Enter an Item ID and whole Target (zero removes), Preview, then separately confirm Execute. Compatible partial stacks are filled before special/ordinary empty slots. A target is never automatic, and cached or unknown quantities cannot authorize a withdrawal. Changed targets, metadata, inventory, combat, cursors and bank sessions stop or invalidate work.
+
+Rules explains all matching enabled OR rules; overlaps have no priority winner. Manual classification and favorites/equipment protections are shown separately. Vendor aggregates private observed sale/buyback facts, independently of History, with current keep-retained units and attributable slot effects. Forecast is read-only and conditional: positive signed values free carried slots, negative values consume them. Partial sales need a temporary slot but free zero slots net. Unknown capacity is not a promise of zero effect.

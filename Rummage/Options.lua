@@ -18,6 +18,7 @@ local function S() return R.settings end
 local function DoRelayout()
 	R:EachUI(function(w) w:ApplySkin() end)
 	if R.Tools and R.Tools.frame and R.Tools.frame:IsShown() then R.Tools:Refresh(); R.Tools:ApplyPosition() end
+	if R.Planning and R.Planning.frame and R.Planning.frame:IsShown() then R.Planning:Refresh(); R.Planning:ApplyPosition() end
 	R:RequestRefresh()
 end
 local function Relayout() R:Defer("optionsRelayout", DoRelayout) end
@@ -97,6 +98,7 @@ local builders = {}
 
 builders.general = function(p)
 	local st = Stacker(p)
+	st:Place(W:Button(p, "Planning And Diagnostics", COL2 - 30, 22, function() R.Planning:Show("restock") end), 22, 6)
 	st:Header("Window")
 	st:Check("Replace Blizzard bags", "replaceBags", "Requires /reload to take full effect.", function() O:NeedReload() end)
 	st:Check("Replace Blizzard bank", "replaceBank", "Requires /reload to take full effect.", function() O:NeedReload() end)

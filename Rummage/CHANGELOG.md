@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.13.0 — 2026-11-21
+
+**Added**
+- **Planning** (`/rum plan`): separate Restock, Rules, Vendor and Forecast views with paged, font-responsive native controls.
+- **Bank Restock Targets**: account-wide desired quantities apply to the current character's carried bags. Preview exact live bank sources, merges and compatible destinations, then confirm that exact plan. Unknown data, changed metadata, sessions or consent stop execution safely.
+- **Rule Diagnostics**: see every enabled OR match and overlap, manual overrides, Scrap/fallback classification, independent sale protections, reserves and final batch limits without modifying rules.
+- **Vendor Session Summary**: private observed sale/buyback facts survive history clearing/eviction and report gross/net proceeds, unique keep-retained quantities and full-versus-partial slot effects. Unconfirmed operations remain separate.
+- **Conditional Bag-Space Forecasts**: Sale, To Bank and From Bank show signed carried-slot effects and temporary split needs. Unknown metadata/capacity is explicit; forecasting never executes a move.
+
+**Safety And Data**
+- Canonical movement now phases pickup/split, matching owned cursor, exact placement and source/destination acknowledgement, including Forever's deferred split counts. Callback changes are revalidated before native actions.
+- Restock targets validate, migrate additively and round-trip with explicit empty markers; old partial exports preserve them. Targets remain outside settings-only profiles.
+- 146 offline Lua cases and 19 publisher cases cover the combined behavior. No installation or live-client qualification was performed for this release's features.
+
 ## 1.12.1 — 2026-11-21
 
 **Added**

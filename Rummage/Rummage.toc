@@ -2,7 +2,7 @@
 ## Title: |cffd9a441Rummage|r
 ## Notes: Bags, bank, search, custom sections, configurable category bars, alt tracking, junk selling, random pet/mount summoning, themes, and addon integrations.
 ## Author: Malikor
-## Version: 1.12.1
+## Version: 1.13.0
 ## IconTexture: Interface\AddOns\Rummage\Media\Icon
 ## SavedVariables: RummageDB
 ## OptionalDeps: Scrap, Auctionator, TradeSkillMaster, Pawn, CanIMogIt, Syndicator, ElvUI, EllesmereUI, GW2_UI, Tukui, NDui, LibSharedMedia-3.0, LibDBIcon-1.0
@@ -19,10 +19,14 @@ Items.lua
 Search.lua
 Categories.lua
 Columns.lua
+InventoryPlan.lua
+VendorSession.lua
 ActionHistory.lua
 Junk.lua
 Buyback.lua
 Mover.lua
+Restock.lua
+RuleDiagnostics.lua
 Integrations.lua
 Tooltip.lua
 Upgrade.lua
@@ -40,5 +44,6 @@ Extras.lua
 Minimap.lua
 Options.lua
 EnhancementsUI.lua
+PlanningUI.lua
 Debug.lua
 Init.lua

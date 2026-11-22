@@ -118,6 +118,8 @@ SlashCmdList.RUMMAGE = function(msg)
 		R.Extras:Command(rest)
 	elseif cmd == "savesearch" then
 		if R.UI:SaveCurrentSearch() then R:Print("Search saved.") end
+	elseif cmd == "plan" then
+		R.Planning:Show(rest ~= "" and rest or "restock")
 	elseif cmd == "history" then
 		R.Tools:Show("history")
 	elseif cmd == "tools" then

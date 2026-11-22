@@ -49,3 +49,11 @@ full targets, bound/changed source stacks, combat and cursor recovery. Publicati
 helper tests run separately: `python3 -I tools/tests/test_publish_release.py`.
 All new scenarios are offline evidence; consult `docs/FOREVER-MANUAL-CHECKLIST.md`
 for explicitly unperformed real-client checks.
+
+
+The 1.13.0 planning suite totals 146 Lua cases, retaining all 122 earlier cases.
+New stateful tests compare Restock's consent/capacity simulation with observed
+source/cursor/destination execution, eager/deferred split timing, live deficit and
+metadata changes. Rule/Vendor/Forecast and all four native Planning views are
+covered, including font sizes 6..24 and explicit Unknown quantities. Publisher
+checks remain the separate 19-case offline suite. No 1.13.0 live checks were run.
