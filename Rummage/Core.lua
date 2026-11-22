@@ -158,6 +158,7 @@ local function DoRefresh()
 	end
 end
 function R:RequestRefresh()
+	R:Fire("PLANNING_INVALIDATED")
 	if refreshQueued then return end
 	refreshQueued = true
 	local wait = 0.08 - (GetTime() - lastRefresh)
@@ -444,7 +445,7 @@ function R:GridCueText(e)
  return (e.fav and ("Favorite " .. e.fav) or "Not Favorite") .. " · " .. (e.junk and "Junk" or "Not Junk") .. " · Q" .. quality .. " " .. names[quality]
 end
 
-local DB_VERSION = 6
+local DB_VERSION = 7
 
 -- Fills missing keys and replaces values whose type differs from the default.
 local function CopyDefaults(src, dst)
@@ -491,6 +492,7 @@ local function SanitizeSettings(st)
 	CopyDefaults(R.defaults, st)
 	if st.upgradePoint ~= nil and not ValidPoint(st.upgradePoint) then st.upgradePoint = nil end
 	if st.toolsPoint ~= nil and not ValidPoint(st.toolsPoint) then st.toolsPoint = nil end
+	if st.planningPoint ~= nil and not ValidPoint(st.planningPoint) then st.planningPoint = nil end
 	for k, r in pairs(CLAMP) do st[k] = min(r[2], max(r[1], st[k])) end
 	st.categoryColumns = floor(st.categoryColumns)
 	for k, set in pairs(ENUMS) do
@@ -721,6 +723,14 @@ function R:InitDB()
 		end
 	end
 	db.keepQuantities = keep
+	local targets, targetCount = {}, 0
+	for id, quantity in pairs(type(db.restockTargets) == "table" and db.restockTargets or {}) do
+		if FiniteNonnegative(id) and id > 0 and id <= 2147483647 and id == floor(id) and FiniteNonnegative(quantity)
+			and quantity > 0 and quantity <= 1000000 and quantity == floor(quantity) and targetCount < 500 then
+			targets[id] = quantity; targetCount = targetCount + 1
+		end
+	end
+	db.restockTargets = targets
 	R.Buyback:SanitizeLedger(db)
 	R.ActionHistory:Sanitize(db)
 	-- v5 (1.9.1): categories become an icon rail for everyone once; the setting stays.
@@ -816,7 +826,7 @@ local function FlattenInto(out, prefix, defaultsNode, settingsNode)
 end
 
 function R:ExportSettings()
-	local out = { "RUM1", "categories.present=1", "junkRules.present=1", "keepQuantities.present=1", "contextProfiles.present=1" }
+	local out = { "RUM1", "categories.present=1", "junkRules.present=1", "keepQuantities.present=1", "contextProfiles.present=1", "restockTargets.present=1" }
 	FlattenInto(out, "", R.defaults, R.settings)
 	local cols = R.settings.columns
 	if cols then
@@ -843,6 +853,7 @@ function R:ExportSettings()
 	for i, q in ipairs(R.db.junkRules) do
 		out[#out + 1] = "rule" .. i .. "=" .. Esc(q)
 	end
+	for id, quantity in pairs(R.db.restockTargets) do out[#out + 1] = "restock." .. id .. "=" .. quantity end
 	for id, quantity in pairs(R.db.keepQuantities) do out[#out + 1] = "keep." .. id .. "=" .. quantity end
 	for key, name in pairs(R.db.contextProfiles) do out[#out + 1] = "context." .. key .. "=" .. Esc(name) end
 	return concat(out, ";")
@@ -884,12 +895,18 @@ function R:ImportSettings(str)
 	local newSettings = DeepCopy(R.settings)
 	local catFields, ruleVals = {}, {}
 	local keep = vals["keepQuantities.present"] == "1" and {} or DeepCopy(R.db.keepQuantities)
+	local targets = vals["restockTargets.present"] == "1" and {} or DeepCopy(R.db.restockTargets)
 	local contexts = vals["contextProfiles.present"] == "1" and {} or DeepCopy(R.db.contextProfiles)
 	local contextKeys = {}; for _, key in ipairs(R.Extras.CONTEXT_KEYS) do contextKeys[key] = true end
 	for path, raw in pairs(vals) do
 		local catIdx, catKey = path:match("^cat(%d+)%.(%a+)$")
 		local ruleIdx = path:match("^rule(%d+)$")
-		if path:match("^keep%.") then
+		if path:match("^restock%.") then
+			local id, quantity = tonumber(path:match("^restock%.(%d+)$")), tonumber(raw)
+			if not FiniteNonnegative(id) or id <= 0 or id > 2147483647 or id ~= floor(id) or not FiniteNonnegative(quantity)
+				or quantity <= 0 or quantity > 1000000 or quantity ~= floor(quantity) then return false, "Invalid Restock Target" end
+			targets[id] = quantity
+		elseif path:match("^keep%.") then
 			local id, quantity = tonumber(path:match("^keep%.(%d+)$")), tonumber(raw)
 			if not FiniteNonnegative(id) or id <= 0 or id > 2147483647 or id ~= floor(id) or not FiniteNonnegative(quantity)
 				or quantity <= 0 or quantity > 1000000 or quantity ~= floor(quantity) then return false, "Invalid Keep Quantity" end
@@ -934,6 +951,8 @@ function R:ImportSettings(str)
 	end
 	local keepCount = 0; for _ in pairs(keep) do keepCount = keepCount + 1 end
 	if keepCount > 500 then return false, "Too Many Keep Quantities" end
+	local targetCount = 0; for _ in pairs(targets) do targetCount = targetCount + 1 end
+	if targetCount > 500 then return false, "Too Many Restock Targets" end
 	SanitizeSettings(newSettings)
 
 	-- Walk the indices that are present, in order: a gap (a hand-edited string
@@ -968,7 +987,9 @@ function R:ImportSettings(str)
 	for k, v in pairs(newSettings) do R.settings[k] = v end
 	if hasCats or vals["categories.present"] == "1" then R.db.categories = newCats end
 	if next(ruleVals) or vals["junkRules.present"] == "1" then R.db.junkRules = newRules end
-	R.db.keepQuantities, R.db.contextProfiles = keep, contexts
+	R.db.keepQuantities, R.db.contextProfiles, R.db.restockTargets = keep, contexts, targets
+	if R.Restock then R.Restock.latest = nil end
+	R:Fire("RESTOCK_CHANGED")
 	R.db.profileName = nil
 	if R.Minimap and R.Minimap.Update then pcall(R.Minimap.Update, R.Minimap) end
 	if R.Options and R.Options.Rebuild then pcall(R.Options.Rebuild, R.Options) end

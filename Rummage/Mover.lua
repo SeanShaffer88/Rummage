@@ -32,7 +32,7 @@ end
 
 function Mover:Busy() return self:IsShown() or self.sendTicker ~= nil or (R.Junk and R.Junk.ticker ~= nil) or (R.Buyback and R.Buyback.operation ~= nil) end
 
-function Mover:Start(planner, label, onDone)
+function Mover:Start(planner, label, onDone, contextValid, onStopped)
 	if InCombatLockdown() then
 		R:Print("Can't move items in combat.")
 		return
@@ -43,7 +43,10 @@ function Mover:Start(planner, label, onDone)
 	end
 	if GetCursorInfo() then return R:Print("Put down the cursor item before moving items.") end
 	self.planner = planner
-	self.contextValid = plannerContexts[planner]
+	self.contextValid = contextValid or plannerContexts[planner]
+	self.onStopped = onStopped
+	self.runID = (self.runID or 0) + 1
+	self.movePhase, self.ownedCursor = nil, nil
 	self.label = label
 	self.onDone = onDone
 	self.steps = 0
@@ -52,67 +55,82 @@ function Mover:Start(planner, label, onDone)
 	self.lockTime = 0
 	self:Show()
 	R:Fire("MOVER_CHANGED", true)
+	return true
 end
 
+local function cursorMatches(move)
+ local kind, id, link = GetCursorInfo()
+ return kind == "item" and id == R.ItemID(move.link) and (not link or link == move.link)
+end
 function Mover:Stop(msg, completed)
-	self:Hide()
-	self.planner = nil
-	if msg then R.ActionHistory:Record("Transfer", "Stopped", { reason = msg }); R:Print(msg) end
-	if self.onDone then
-		local fn = self.onDone
-		self.onDone = nil
-		if completed then fn() end
-	end
-	R:Fire("MOVER_CHANGED", false)
-	R:RequestRefresh()
+ local move, owned, done, stopped = self.last, self.ownedCursor, self.onDone, self.onStopped
+ self:Hide(); self.planner, self.last, self.onDone, self.onStopped, self.ownedCursor, self.movePhase = nil, nil, nil, nil, nil, nil
+ if owned and move and cursorMatches(move) then ClearCursor() end
+ if stopped then stopped(msg, completed) end
+ if msg then R.ActionHistory:Record("Transfer", "Stopped", { reason = msg }); R:Print(msg) end
+ if completed and done then done() end
+ R:Fire("MOVER_CHANGED", self:Busy()); R:RequestRefresh()
 end
-
+local function destinationMatches(move)
+ local link, count, _, _, locked = API.GetSlotInfo(move.to[1], move.to[2])
+ return link == move.targetLink and (count or 0) == move.targetCount and not locked
+end
 Mover:SetScript("OnUpdate", function(self, elapsed)
-	self.wait = self.wait - elapsed
-	if self.wait > 0 then return end
-	if InCombatLockdown() then return self:Stop("Stopped: entered combat.") end
-	if self.contextValid and not self.contextValid() then return self:Stop("Stopped: bank session ended.") end
-
-	if GetCursorInfo() then return self:Stop("Stopped: cursor is occupied.") end
-
-	local last = self.last
-	if last then
-		local source, count, _, _, sourceLocked = API.GetSlotInfo(last.from[1], last.from[2])
-		local target, quantity, _, _, targetLocked = API.GetSlotInfo(last.to[1], last.to[2])
-		local fromMatches = last.remaining == 0 and not source or (source == last.link and count == last.remaining)
-		if fromMatches and target == last.link and quantity == last.expected and not sourceLocked and not targetLocked then
-			R.ActionHistory:Record("Transfer", "Observed", { itemID = R.ItemID(last.link), link = last.link, count = last.amountMoved,
-				from = last.from[1] .. ":" .. last.from[2], to = last.to[1] .. ":" .. last.to[2], reason = "Source And Destination Quantities Verified" })
-			self.last = nil
-		else
-			self.lockTime = self.lockTime + elapsed
-			if self.lockTime > LOCK_TIMEOUT then return self:Stop("Stopped: transfer remains unconfirmed.") end
-			return
-		end
-	end
-	self.lockTime = 0
-
-	self.steps = self.steps + 1
-	if self.steps > MAX_STEPS then return self:Stop("Stopped: move limit reached.") end
-
-	local move, err = self.planner()
-	if not move then return self:Stop(err, err == nil) end
-
-	local link, count = API.GetSlotInfo(move.from[1], move.from[2])
-	local _, targetCount = API.GetSlotInfo(move.to[1], move.to[2])
-	move.link, move.amountMoved = link, move.amount or count or 1
-	move.remaining, move.expected = (count or 1) - move.amountMoved, (targetCount or 0) + move.amountMoved
-	R.ActionHistory:Record("Transfer", "Requested", { itemID = link and R.ItemID(link), link = link, count = move.amountMoved,
-		from = move.from[1] .. ":" .. move.from[2], to = move.to[1] .. ":" .. move.to[2], reason = "Awaiting Inventory Placement" })
-	if move.amount then
-		API.SplitContainerItem(move.from[1], move.from[2], move.amount)
-	else
-		API.PickupContainerItem(move.from[1], move.from[2])
-	end
-	API.PickupContainerItem(move.to[1], move.to[2])
-	if GetCursorInfo() then ClearCursor() end
-	self.last = move
-	self.wait = 0.05
+ self.wait = self.wait - elapsed; if self.wait > 0 then return end
+ local run = self.runID
+ if InCombatLockdown() then return self:Stop("Stopped: entered combat.") end
+ if self.contextValid and not self.contextValid() then return self:Stop("Stopped: operation session changed.") end
+ local last = self.last
+ if last then
+  local source, count, _, _, sourceLocked = API.GetSlotInfo(last.from[1], last.from[2])
+  if self.movePhase == "Cursor" then
+   if GetCursorInfo() and not cursorMatches(last) then return self:Stop("Stopped: cursor identity changed.") end
+   local expected = (last.remaining == 0 and not source) or (source == last.link and count == last.remaining)
+    or (source == last.link and count == last.sourceCount and sourceLocked)
+   if cursorMatches(last) and expected then
+    self.ownedCursor = true
+    if not destinationMatches(last) or (last.validate and not last.validate()) then return self:Stop("Stopped: destination or approved quantity changed.") end
+    API.PickupContainerItem(last.to[1], last.to[2])
+    self.movePhase, self.lockTime = "Ack", 0
+    if not GetCursorInfo() then self.ownedCursor = nil end
+   else self.lockTime = self.lockTime + elapsed; if self.lockTime > LOCK_TIMEOUT then return self:Stop("Stopped: pickup remains unconfirmed.") end end
+   return
+  end
+  local target, quantity, _, _, targetLocked = API.GetSlotInfo(last.to[1], last.to[2])
+  local fromMatches = (last.remaining == 0 and not source) or (source == last.link and count == last.remaining)
+  if fromMatches and target == last.link and quantity == last.expected and not sourceLocked and not targetLocked then
+   self.last, self.movePhase, self.ownedCursor = nil, nil, nil
+   if last.onObserved then last.onObserved() end
+   R.ActionHistory:Record("Transfer", "Observed", { itemID = R.ItemID(last.link), link = last.link, count = last.amountMoved,
+    from = last.from[1] .. ":" .. last.from[2], to = last.to[1] .. ":" .. last.to[2], reason = (last.reason or "Transfer") .. ": Source And Destination Quantities Verified" })
+   if self.runID ~= run or not self:IsShown() then return end
+  else
+   if GetCursorInfo() and not (self.ownedCursor and cursorMatches(last)) then return self:Stop("Stopped: cursor is occupied.") end
+   self.lockTime = self.lockTime + elapsed; if self.lockTime > LOCK_TIMEOUT then return self:Stop("Stopped: transfer remains unconfirmed.") end
+   return
+  end
+ elseif GetCursorInfo() then return self:Stop("Stopped: cursor is occupied.") end
+ self.lockTime = 0
+ self.steps = self.steps + 1; if self.steps > MAX_STEPS then return self:Stop("Stopped: move limit reached.") end
+ local move, err = self.planner()
+ if not move then return self:Stop(err, err == nil) end
+ local link, count, _, _, locked = API.GetSlotInfo(move.from[1], move.from[2])
+ local targetLink, targetCount, _, _, targetLocked = API.GetSlotInfo(move.to[1], move.to[2])
+ if not link or locked or targetLocked then return self:Stop("Stopped: source or destination is locked or unavailable.") end
+ move.link, move.sourceCount, move.targetLink, move.targetCount = link, count or 1, targetLink, targetCount or 0
+ move.amountMoved = move.amount or move.sourceCount
+ move.remaining, move.expected = move.sourceCount - move.amountMoved, move.targetCount + move.amountMoved
+ R.ActionHistory:Record("Transfer", "Requested", { itemID = R.ItemID(link), link = link, count = move.amountMoved,
+  from = move.from[1] .. ":" .. move.from[2], to = move.to[1] .. ":" .. move.to[2], reason = (move.reason or "Transfer") .. ": Awaiting Inventory Placement" })
+ if self.runID ~= run or not self:IsShown() then return end
+ local fresh, freshCount, _, _, freshLocked = API.GetSlotInfo(move.from[1], move.from[2])
+ if GetCursorInfo() or fresh ~= link or freshCount ~= move.sourceCount or freshLocked or not destinationMatches(move)
+  or (self.contextValid and not self.contextValid()) or (move.validate and not move.validate()) then return self:Stop("Stopped: approved movement changed before request.") end
+ if move.amount and not API.SplitContainerItem then return self:Stop("Stopped: exact split unsupported.") end
+ self.last, self.movePhase = move, "Cursor"
+ if move.amount then API.SplitContainerItem(move.from[1], move.from[2], move.amount) else API.PickupContainerItem(move.from[1], move.from[2]) end
+ self.ownedCursor = cursorMatches(move) or nil
+ self.wait = 0.05
 end)
 
 ---------------------------------------------------------------------------

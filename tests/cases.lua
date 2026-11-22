@@ -185,7 +185,7 @@ test("sanitizer repairs garbage and migrates a v3 database", function()
   assert(s.keyboardNav == true, "type repaired")
   assert(s.viewSizes.evil == nil and s.viewSizes.bags.w == 400 and s.viewSizes.bags.h == 2400 and s.viewSizes.bags.scale == 2)
   assert(#db.savedSearches == 2 and #db.junkLog == 1 and db.contextProfiles.spec1 == "P" and db.contextProfiles.raid == nil)
-  assert(db.version == 6, "version bumped")
+  assert(db.version == 7, "version bumped")
   local n = 0
   for _, k in ipairs(s.columns.order) do if k == "name" then n = n + 1 end; assert(type(k) == "string") end
   assert(n <= 1, "column order deduped")
@@ -1206,7 +1206,7 @@ test("upgrading to DB v5 turns the icon rail on once", function()
   local _, R = boot(function(e)
     e.RummageDB = { version = 4, settings = { compactSidebar = false }, chars = {} }
   end)
-  assert(R.settings.compactSidebar == true and R.db.version == 6, "migrated")
+  assert(R.settings.compactSidebar == true and R.db.version == 7, "migrated")
   local _, R2 = boot(function(e)
     e.RummageDB = { version = 5, settings = { compactSidebar = false }, chars = {} }
   end)
@@ -1694,7 +1694,9 @@ local function inventoryModel(env, R, options)
     env.__bags[bag][slot] = { link = h.link, id = h.id, count = h.count, quality = h.quality }
     model.held = nil
    elseif model.held and s and model.held.link == s.link then
-    s.count = s.count + model.held.count; model.held = nil
+    local h = model.held
+    if h.deferred then local source = env.__bags[h.source[1]][h.source[2]]; source.count, source.locked = source.count - h.count, nil end
+    s.count = s.count + h.count; model.held = nil
    elseif not model.held and s then
     model.held = { link = s.link, id = s.id, count = s.count, quality = s.quality, source = { bag, slot } }
     env.__bags[bag][slot] = nil
@@ -1861,7 +1863,7 @@ test("history sanitizes bounds IDs enums and pages without exporting local recor
    { id = 1e100, t = 2, action = "Sale", status = "Observed", native = function() end },
    { id = 1, t = math.huge, action = "Sale", status = "Observed" }, { t = 2, action = "Evil", status = "Observed" } } }
  end)
- assert(R.db.version == 6 and #R.db.actionHistory == 2)
+ assert(R.db.version == 7 and #R.db.actionHistory == 2)
  local ids = {}; for _, e in ipairs(R.db.actionHistory) do assert(not ids[e.id]); ids[e.id] = true; assert(not e.native and #(e.reason or "") <= 180) end
  for i = 1, 110 do R.ActionHistory:Record(i % 2 == 0 and "Sale" or "Transfer", i % 3 == 0 and "Skipped" or "Requested", { count = i, reason = "Example" }) end
  assert(#R.db.actionHistory == 100)
@@ -2536,6 +2538,7 @@ end)
 test("bank delayed acknowledgement does not complete or advance while source remains locked", function()
  local env, R, model, link = bankModel()
  local held, waiting
+ env.GetCursorInfo = function() if held then return "item", held.item.id, held.item.link end end
  R.API.PickupContainerItem = function(bag, slot)
   if not held then
    held = { bag = bag, slot = slot, item = env.__bags[bag][slot] }; held.item.locked = true
@@ -2587,4 +2590,381 @@ test("unknown merchant list size cannot confirm buyback despite inventory and mo
   m:ack(); env.__tick(2)
   assert(#R.db.junkLog == 1 and not historyHas(R, "Buyback", "Observed") and not R.Buyback.operation, tostring(size))
  end
+end)
+
+
+-- Append once to tests/cases.lua; uses its existing test/boot helpers.
+
+-- Append once to tests/cases.lua; uses its existing test/boot helpers.
+test("rule diagnostics reports every OR overlap once and keeps manual classification separate from protection", function()
+ local env, R = boot()
+ env.__addItem(0, 1, 2100, 5, { name = "Linen Cloth", quality = 0, sell = 2 })
+ R.db.junkRules = { "linen", "type:miscellaneous | linen" }
+ local before = #R.db.junkRules
+ local result = assert(R.RuleDiagnostics:AnalyzeRules())
+ assert(result.matchedUnits == 5 and result.overlapUnits == 5 and result.overlapPairs["1:2"] == 5 and result.sellUnits == 5)
+ assert(#result.rows[1].matches == 2 and result.rows[1].detail:find("No Priority Winner", 1, true))
+ R.db.junk[2100] = false
+ result = assert(R.RuleDiagnostics:AnalyzeRules()); assert(result.rows[1].source == "Manual Keep" and not result.rows[1].junk and result.sellUnits == 0)
+ R.db.junk[2100] = true; R.db.favorites[2100] = 2
+ result = assert(R.RuleDiagnostics:AnalyzeRules()); assert(result.rows[1].junk and result.rows[1].source == "Manual Junk" and result.sellUnits == 0)
+ R.settings.protectFavorites = false
+ result = assert(R.RuleDiagnostics:AnalyzeRules("linen")); assert(result.sellUnits == 5 and result.draft.sellUnits == 0)
+ assert(result.rows[1].detail:find("Draft Preview Excludes Favorites", 1, true) and #R.db.junkRules == before and not env.__used)
+ R.Items.InSet = function() return true end
+ result = assert(R.RuleDiagnostics:AnalyzeRules()); assert(result.sellUnits == 0 and result.rows[1].detail:find("Equipment", 1, true))
+end)
+
+test("rule diagnostics uses one canonical Scrap decision and exposes fallback errors unknown data and cap effects", function()
+ local env, R = boot()
+ env.__addItem(0, 1, 2101, 3, { name = "Stone", quality = 0, sell = 1 })
+ R.settings.useScrap = true
+ local calls = 0
+ env.Scrap = { IsJunk = function() calls = calls + 1; return false end }
+ local result = assert(R.RuleDiagnostics:AnalyzeRules()); assert(result.rows[1].source == "Scrap" and not result.rows[1].junk and result.sellUnits == 0)
+ env.Scrap.IsJunk = function() error("unavailable") end
+ result = assert(R.RuleDiagnostics:AnalyzeRules()); assert(result.rows[1].junk and result.rows[1].detail:find("Plugin Error", 1, true))
+ R.Items.Info = function() return nil end
+ result = assert(R.RuleDiagnostics:AnalyzeRules()); assert(result.sellUnits == 0 and result.rows[1].detail:find("Unknown Item Data", 1, true))
+ assert(not R.RuleDiagnostics:AnalyzeRules("(|) | stone"))
+ local e2, R2 = boot(); e2.__bags[0].size = 15; R2.settings.buybackSafe = true; R2.db.junkRules = { "cloth", "cloth" }
+ for i = 1, 15 do e2.__addItem(0, i, 2110 + i, 1, { name = "Cloth" .. i, quality = 0, sell = i }) end
+ result = assert(R2.RuleDiagnostics:AnalyzeRules()); assert(result.overlapUnits == 15 and result.sellUnits == 12)
+ local capped = 0; for _, row in ipairs(result.rows) do if row.detail:find("Batch Limit", 1, true) then capped = capped + 1 end end
+ assert(capped == 3)
+end)
+
+test("vendor summary uses private deduplicated facts independent of history and raw wallet changes", function()
+ local env, R = boot(); env.MerchantFrame:Show(); env.__ev("MERCHANT_SHOW")
+ env.__addItem(0, 1, 2120, 5, { quality = 0, sell = 5 }); env.__addItem(0, 2, 2120, 4, { quality = 0, sell = 5 }); R.Junk:SetKeep(2120, 3)
+ local V, token = R.VendorSession, R.VendorSession:Token()
+ V:Record("Sale", "Candidate", { session = token, itemID = 2120 })
+ V:Record("Sale", "Requested", { session = token, operationID = "one", itemID = 2120 })
+ local full = { session = token, operationID = "one", saleLedgerID = "sale:2:1", itemID = 2120, count = 2, value = 10, slotsFreed = 1 }
+ assert(V:Record("Sale", "Observed", full)); assert(not V:Record("Sale", "Observed", full))
+ local partial = { session = token, operationID = "two", saleLedgerID = "sale:2:2", itemID = 2120, count = 1, value = 5, slotsFreed = 0 }
+ V:Record("Split", "Observed", { session = token, operationID = "two", itemID = 2120, slotsConsumed = 1 })
+ V:Record("Sale", "Observed", partial)
+ R.ActionHistory:Clear(); for i = 1, 110 do R.ActionHistory:Record("Sale", "Requested", { count = 999, value = 999, reason = "Not A Private Fact" }) end
+ env.__money = env.GetMoney() + 9999
+ local result = V:Summary(); assert(result.observedStacks == 2 and result.observedUnits == 3 and result.gross == 15 and result.retained == 3 and result.slotsFreed == 1 and result.stagingSlots == 0)
+ assert(V:Record("Buyback", "Observed", { session = token, operationID = "back", saleLedgerID = "sale:2:1", itemID = 2120, count = 2, value = 10 }))
+ assert(not V:Record("Buyback", "Observed", { session = token, operationID = "duplicate", saleLedgerID = "sale:2:1", itemID = 2120, count = 2, value = 10 }))
+ result = V:Summary(); assert(result.gross == 15 and result.buybackCost == 10 and result.net == 5)
+end)
+
+test("vendor close seals epochs and fully retained candidates remain counted once", function()
+ local env, R = boot(); env.MerchantFrame:Show(); env.__ev("MERCHANT_SHOW")
+ env.__addItem(0, 1, 2130, 5, { quality = 0, sell = 1 }); R.Junk:SetKeep(2130, 10)
+ local V, old = R.VendorSession, R.VendorSession:Token()
+ V:Record("Sale", "Candidate", { session = old, itemID = 2130 }); V:Record("Sale", "Candidate", { session = old, itemID = 2130 })
+ assert(V:Summary().retained == 5 and V:Summary().gross == 0 and V:Summary().summary:find("No Observed Sales", 1, true))
+ V:Record("Split", "Observed", { session = old, operationID = "stage", itemID = 2130, slotsConsumed = 1 })
+ V:Record("Sale", "Stopped", { session = old, operationID = "stage", itemID = 2130 })
+ assert(V:Summary().stagingSlots == 1 and V:Summary().stopped == 1)
+ env.__ev("MERCHANT_CLOSED"); assert(not V:Summary().active and V:Summary().retained == 5)
+ env.__ev("MERCHANT_SHOW"); assert(V:Token() ~= old)
+ assert(not V:Record("Sale", "Observed", { session = old, operationID = "late", saleLedgerID = "sale:2:3", itemID = 2130, count = 1, value = 1, slotsFreed = 1 }))
+ assert(V:Summary().observedStacks == 0)
+ V:Record("Buyback", "Observed", { session = V:Token(), operationID = "oldBuyback", saleLedgerID = "sale:1:99", itemID = 2130, count = 1, value = 20 })
+ local result = V:Summary(); assert(result.net == -20 and result.rows[4].detail:sub(1, 1) == "-")
+end)
+
+test("vendor retained quantity is Unknown when live quantity capture is unavailable", function()
+ local env, R = boot(); env.MerchantFrame:Show(); env.__ev("MERCHANT_SHOW")
+ R.VendorSession:Record("Sale", "Candidate", { session = R.VendorSession:Token(), itemID = 2140 })
+ local original = R.API.GetNumSlots
+ R.API.GetNumSlots = function(bag) if bag == 0 then return nil end; return original(bag) end
+ local result = R.VendorSession:Summary(); assert(result.retained == nil and result.rows[5].detail == "Unknown")
+end)
+
+test("Planning has four paged native views with bounded typography and no reopening allocations", function()
+ local env, R = boot(); env.UIParent:SetSize(1280, 720)
+ for i = 1, 20 do R.Restock:SetTarget(2200 + i, i) end
+ R.Planning:Show("restock"); local count = #env.__frames
+ for _, font in ipairs({ 6, 12, 24 }) do
+  R.settings.fontSize = font; R.Widgets:UpdateFonts()
+  for _, tab in ipairs({ "restock", "rules", "vendor", "forecast" }) do
+   R.Planning:Show(tab); local P, g = R.Planning, R.Planning.layout
+   assert(P.status:GetHeight() >= g.line * 3 and g.rowTop >= g.statusTop + g.statusHeight + 10)
+   assert(g.rowTop + P.pageSize * (g.rowHeight + 2) + g.control + 18 <= P.frame:GetHeight())
+   for _, row in ipairs(P.rows) do local _, _, _, _, y = row.detail:GetPoint(); assert(-y >= row.text:GetHeight() + 4) end
+   assert(P.frame:GetWidth() <= 1280 and P.frame:GetHeight() <= 720 and P.frame:GetScale() <= 1)
+  end
+ end
+ assert(#env.__frames == count)
+ R.Planning:Show("restock"); assert(R.Planning.pageSize < 8)
+ R.Planning.next:Click(); assert(R.Planning.page == 2); R.Planning.previous:Click(); assert(R.Planning.page == 1)
+end)
+
+test("Planning restock executes only captured confirmation and draft/query changes invalidate views", function()
+ local env, R = boot(); R.Planning:Show("restock")
+ local P = R.Planning
+ P.restockID:SetText("2300"); P.restockCount:SetText("1.5"); P:SaveTarget(false); assert(not R.db.restockTargets[2300])
+ P.restockCount:SetText("5"); P:SaveTarget(false); assert(R.db.restockTargets[2300] == 5 and not P.preview)
+ local token = { executable = true, moves = { {} }, rows = {}, forecast = { known = true, netCarriedSlots = -1 } }
+ local oldPreview, oldExecute = R.Restock.Preview, R.Restock.Execute
+ R.Restock.Preview = function() return token end
+ local executed
+ R.Restock.Execute = function(_, preview) executed = preview; return true end
+ P:Run(); P:ConfirmExecute(); assert(not executed and env.__popup.which == "RUMMAGE_CONFIRM_RESTOCK")
+ env.StaticPopupDialogs.RUMMAGE_CONFIRM_RESTOCK.OnAccept(nil, env.__popup.args[3]); assert(executed == token and not P.preview)
+ R.Restock.Preview, R.Restock.Execute = oldPreview, oldExecute
+ P:SaveTarget(true); assert(not R.db.restockTargets[2300])
+ P:Show("rules"); P.queryBox:SetText("(|) | cloth"); P:Run(); assert(not P.result and P.status:GetText() ~= "")
+ P:Show("forecast"); P.queryBox:SetText(""); P:Run(); assert(P.result)
+ P.queryBox:SetText("cloth"); P.queryBox.scripts.OnTextChanged(P.queryBox); assert(not P.result)
+ local menu; R.Widgets.Menu = function(_, _, entries) menu = entries end
+ P:ChooseForecast(P.kindButton)
+ for _, entry in ipairs(menu) do if entry.text == "From Bank" then entry.func() end end
+ assert(P.forecastKind == "fromBank" and not P.result)
+end)
+
+
+test("vendor summary consumes real observed sale and buyback facts before history notification side effects", function()
+ local env, R = boot(); env.MerchantFrame:Show(); env.__ev("MERCHANT_SHOW")
+ local link = env.__addItem(0, 1, 2400, 20, { name = "Session Cloth", quality = 0, sell = 3, stack = 20 })
+ R.Junk:SetKeep(2400, 7)
+ local model = inventoryModel(env, R, { deferredSourceCount = true })
+ local cleared = false
+ R:Listen("ACTION_HISTORY_CHANGED", function()
+  local row = R.db.actionHistory[1]
+  if not cleared and row and row.action == "Sale" and row.status == "Observed" then cleared = true; R.ActionHistory:Clear() end
+ end)
+ R.Junk:SellAll(); model:tick(12)
+ local result = R.VendorSession:Summary()
+ assert(cleared and result.observedStacks == 1 and result.observedUnits == 13 and result.gross == 39 and result.slotsFreed == 0 and result.stagingSlots == 0 and result.retained == 7)
+ env.__buyback = { { link = link, count = 13, price = 39 } }
+ R.Junk:Buyback(1); env.__tick(3)
+ result = R.VendorSession:Summary(); assert(result.gross == 39 and result.buybackCost == 39 and result.net == 0)
+ local token = result.session
+ env.__ev("MERCHANT_CLOSED"); env.__ev("MERCHANT_SHOW")
+ assert(R.VendorSession:Summary().gross == 0 and not R.VendorSession:Record("Sale", "Observed", { session = token, operationID = "stale", saleLedgerID = "sale:2:999", itemID = 2400, count = 1, value = 3, slotsFreed = 1 }))
+end)
+
+
+local function restockFixture(options)
+ local env, R = boot()
+ R.API.BankBagList = { -1 }; env.__bags[-1] = { size = 4 }
+ env.__addItem(0, 1, 2000, 7, { name = "Restock Cloth", stack = 15, sell = 2 })
+ env.__addItem(-1, 1, 2000, 50, { name = "Restock Cloth", stack = 15, sell = 2 })
+ env.__ev("BANKFRAME_OPENED"); R.Restock:SetTarget(2000, 20)
+ local model = inventoryModel(env, R, options)
+ function model:frames(n) for i = 1, n do self:tick(1); env.__update(0.25) end end
+ return env, R, model
+end
+
+test("restock oracle withdraws exact thirteen using existing capacity eight and one new slot five", function()
+ for _, deferred in ipairs({ false, true }) do
+  local env, R, model = restockFixture({ deferredSourceCount = deferred })
+  local preview = R.Restock:Preview()
+  assert(preview.executable and preview.rows[1].plannedWithdraw == 13 and #preview.moves == 2)
+  assert(preview.moves[1].count == 8 and preview.moves[2].count == 5 and preview.forecast.netCarriedSlots == -1)
+  assert(R.Restock:Execute(preview)); model:frames(12)
+  local totals = R.InventoryPlan:Totals(R.InventoryPlan:Capture(R.API.InvBagList, false))
+  assert(totals[2000] == 20 and env.__bags[-1][1].count == 37 and not R.Restock.operation and not R.Mover:Busy())
+  assert(historyHas(R, "Transfer", "Observed", "Restock") and env.__bags[0][1].count == 15 and env.__bags[0][2].count == 5)
+ end
+end)
+
+test("restock consent rejects modified superseded configuration session and source snapshots", function()
+ for _, mode in ipairs({ "modified", "latest", "target", "session", "source", "count", "locked", "destination" }) do
+  local env, R, model = restockFixture()
+  local preview = R.Restock:Preview()
+  if mode == "modified" then preview.moves[1].count = 99
+  elseif mode == "latest" then R.Restock:Preview()
+  elseif mode == "target" then R.Restock:SetTarget(2000, 30)
+  elseif mode == "session" then env.__ev("BANKFRAME_CLOSED"); env.__ev("BANKFRAME_OPENED")
+  elseif mode == "source" then env.__addItem(-1, 1, 9999, 50)
+  elseif mode == "count" then env.__bags[-1][1].count = 49
+  elseif mode == "locked" then env.__bags[-1][1].locked = true
+  else env.__bags[0][1].count = 8 end
+  assert(not R.Restock:Execute(preview), mode); model:frames(3)
+  assert(model.calls.pickup == 0 and model.calls.split == 0)
+ end
+end)
+
+test("restock shrinks current deficit but never expands original consent after outside changes", function()
+ local env, R, model = restockFixture()
+ local preview = R.Restock:Preview(); local added = false
+ R:Listen("ACTION_HISTORY_CHANGED", function()
+  local e = R.db.actionHistory[1]
+  if not added and e and e.action == "Transfer" and e.status == "Observed" then added = true; env.__addItem(0, 3, 2000, 2, { stack = 15 }) end
+ end)
+ assert(R.Restock:Execute(preview)); model:frames(15)
+ local totals = R.InventoryPlan:Totals(R.InventoryPlan:Capture(R.API.InvBagList, false))
+ assert(added and totals[2000] == 20 and env.__bags[-1][1].count == 39, "only eleven were still needed")
+ local e2, R2, m2 = restockFixture(); local p2 = R2.Restock:Preview(); assert(R2.Restock:Execute(p2)); R2.Restock:SetTarget(2000, 30); m2:frames(3)
+ assert(m2.calls.split == 0 and not R2.Restock.operation)
+end)
+
+test("restock blocks unknown carried stack family bank capacity unsupported splits and met targets", function()
+ for _, mode in ipairs({ "carried", "stack", "family", "bank", "split", "met", "closed", "full" }) do
+  local env, R, model = restockFixture()
+  if mode == "carried" then local get = R.API.GetSlotInfo; R.API.GetSlotInfo = function(bag, slot) if bag == 0 and slot == 2 then error("Unknown Slot") end; return get(bag, slot) end
+  elseif mode == "stack" then local info = R.API.GetItemInfo; R.API.GetItemInfo = function(link) local a,b,c,d,e,f,g,_,i,j,k,l,m,n = info(link); return a,b,c,d,e,f,g,nil,i,j,k,l,m,n end
+   env.__addItem(0, 1, 2001, 7, { stack = 15 }); env.__addItem(-1, 1, 2001, 50, { stack = 15 }); R.Restock:SetTarget(2000, 0); R.Restock:SetTarget(2001, 20)
+  elseif mode == "family" then R.API.GetItemFamily = function() return nil end
+  elseif mode == "bank" then env.__bags[-1].size = 0
+  elseif mode == "split" then R.API.SplitContainerItem = nil
+  elseif mode == "met" then R.Restock:SetTarget(2000, 7)
+  elseif mode == "closed" then env.__ev("BANKFRAME_CLOSED")
+  else env.__bags[0].size = 1; env.__bags[0][1].count = 15; R.Restock:SetTarget(2000, 30) end
+  local p = R.Restock:Preview(); assert(not p.executable, mode)
+  assert(not R.Restock:Execute(p) and model.calls.pickup == 0 and model.calls.split == 0)
+  if mode == "carried" then assert(not p.rows[1].carriedKnown and p.rows[1].reason:find("Unknown", 1, true)) end
+ end
+end)
+
+test("restock exact link variants prefer compatible special slots and reserve each destination once", function()
+ local env, R, model = restockFixture()
+ env.__bags[0].size = 1; env.__bags[1] = { size = 2 }
+ env.__addItem(-1, 2, 2000, 6, { stack = 15 }); env.__bags[-1][2].link = env.__bags[-1][2].link .. "variant"
+ R.API.GetNumFreeSlots = function(bag) return 2, bag == 1 and 8 or 0 end
+ R.API.GetItemFamily = function() return 8 end
+ R.Restock:SetTarget(2000, 25)
+ local p = R.Restock:Preview(); assert(#p.moves >= 2)
+ assert(p.moves[1].to[1] == 0 and p.moves[1].count == 8)
+ local occupied = {}; for _, m in ipairs(p.moves) do if not m.destLink then local key = m.to[1] .. ":" .. m.to[2]; assert(not occupied[key]); occupied[key] = true end end
+ assert(R.Restock:Execute(p)); model:frames(20)
+ assert(R.InventoryPlan:Totals(R.InventoryPlan:Capture(R.API.InvBagList, false))[2000] == 25)
+end)
+
+test("restock metadata replacement interruption and rejected acknowledgement release singleton ownership", function()
+ for _, mode in ipairs({ "familyBefore", "familyDuring", "combat", "close", "cursor", "cancel", "reject" }) do
+  local env, R, model = restockFixture({ rejectPlace = mode == "reject" })
+  local preview = R.Restock:Preview()
+  if mode == "familyBefore" then R.API.GetNumFreeSlots = function() return 0, 64 end; assert(not R.Restock:Execute(preview))
+  else
+   assert(R.Restock:Execute(preview)); model:frames(1)
+   if mode == "familyDuring" then R.API.GetNumFreeSlots = function() return 0, 64 end
+   elseif mode == "combat" then env.__combat = true
+   elseif mode == "close" then env.__ev("BANKFRAME_CLOSED"); env.__ev("BANKFRAME_OPENED")
+   elseif mode == "cursor" then model.held = { id = 9999, link = "item:9999", count = 1 }
+   elseif mode == "cancel" then R.Restock:Cancel() end
+  end
+  model:frames(25)
+  assert(not R.Restock.operation and not R.Mover:Busy() and not historyHas(R, "Transfer", "Observed"), mode)
+  if mode == "cursor" then assert(model.held.id == 9999 and model.calls.clear == 0) end
+ end
+end)
+
+test("restock request listeners cannot replace source or approved deficit before native pickup", function()
+ local env, R, model = restockFixture(); local p = R.Restock:Preview()
+ R:Listen("ACTION_HISTORY_CHANGED", function()
+  local e = R.db.actionHistory[1]
+  if e and e.action == "Transfer" and e.status == "Requested" then env.__bags[-1][1].count = 49 end
+ end)
+ assert(R.Restock:Execute(p)); model:frames(3)
+ assert(model.calls.split == 0 and model.calls.pickup == 0 and not R.Restock.operation)
+end)
+
+test("restock targets migrate sanitize round-trip explicit empties atomically and stay outside profiles", function()
+ local env, R = boot(function(e) e.RummageDB = { version = 6, restockTargets = { [1] = 7, [2] = 0, [3] = -1, [4] = 1.5, [1e100] = 9 } } end)
+ assert(R.db.version == 7 and R.db.restockTargets[1] == 7 and R.db.restockTargets[2] == nil and R.db.restockTargets[1e100] == nil)
+ assert(not R.Restock:SetTarget(1, 1.5) and not R.Restock:SetTarget(0, 1))
+ R.Restock:SetTarget(2589, 35); local out = R:ExportSettings(); R.db.restockTargets = {}; assert(R:ImportSettings(out)); assert(R.db.restockTargets[2589] == 35)
+ assert(R:ImportSettings("RUM1;scale=1") and R.db.restockTargets[2589] == 35)
+ assert(not R:ImportSettings("RUM1;scale=1.8;restock.2589=1.5") and R.settings.scale == 1 and R.db.restockTargets[2589] == 35)
+ assert(R:ImportSettings("RUM1;restockTargets.present=1") and next(R.db.restockTargets) == nil)
+ R.Restock:SetTarget(1, 2); R:SaveProfile("Targets"); R.Restock:SetTarget(1, 3); R:ApplyProfile("Targets"); assert(R.db.restockTargets[1] == 3)
+end)
+
+test("forecast uses enabled junk plan not a hypothetical query rule and handles full partial blocked sales", function()
+ local env, R = boot(); env.__addItem(0, 1, 2010, 10, { name = "Cloth", quality = 1, sell = 1, stack = 20 })
+ local no = assert(R.InventoryPlan:Forecast("sale", "cloth")); assert(no.netCarriedSlots == 0 and #no.rows == 0)
+ R.db.junk[2010] = true; local full = R.InventoryPlan:Forecast("sale", "cloth"); assert(full.netCarriedSlots == 1)
+ R.Junk:SetKeep(2010, 7); local partial = R.InventoryPlan:Forecast("sale", "cloth"); assert(partial.netCarriedSlots == 0 and partial.temporarySlotsNeeded == 1 and partial.blockedMoves == 0)
+ env.__bags[0].size = 1; local blocked = R.InventoryPlan:Forecast("sale", "cloth"); assert(blocked.netCarriedSlots == 0 and blocked.blockedMoves == 1)
+ assert(env.__bags[0][1].count == 10 and not env.__picked and not env.__split and not env.__used)
+end)
+
+test("slot allocator forecasts signed carried effects for disjoint bags and marks overlaps unsupported", function()
+ local env, R = boot(); env.__addItem(0, 1, 2020, 5, { stack = 20, sell = 1 }); env.__bags[0].size = 1; env.__bags[1] = { size = 1 }
+ local from = R.InventoryPlan:Capture({ 0 }, false); local to = R.InventoryPlan:Capture({ 1 }, false)
+ local empty = R.InventoryPlan:Allocate(from, to, { [2020] = 5 }); assert(empty.netCarriedSlots == 0)
+ env.__addItem(1, 1, 2020, 3, { stack = 20, sell = 1 }); to = R.InventoryPlan:Capture({ 1 }, false)
+ local merge = R.InventoryPlan:Allocate(from, to, { [2020] = 5 }); assert(merge.netCarriedSlots == 1 and #merge.moves == 1)
+ local overlap = R.InventoryPlan:Allocate(from, from, { [2020] = 5 }); assert(not overlap.known and #overlap.moves == 0)
+ local own = R.InventoryPlan:Destination(from.slots[1], from.slots); assert(own == nil)
+ local partial = R.InventoryPlan:Allocate(from, to, { [2020] = 2 }); assert(partial.netCarriedSlots == 0)
+end)
+
+test("forecast bank signed slots and unknown quantities are conditional with no inventory mutation", function()
+ local env, R, model = restockFixture()
+ local bank = assert(R.InventoryPlan:Forecast("fromBank", "restock")); assert(bank.netCarriedSlots < 0)
+ local bags = assert(R.InventoryPlan:Forecast("toBank", "restock")); assert(bags.netCarriedSlots == 1)
+ assert(model.calls.pickup == 0 and model.calls.split == 0 and env.__bags[-1][1].count == 50)
+ env.__ev("BANKFRAME_CLOSED"); assert(not R.InventoryPlan:Forecast("fromBank", "").known)
+ local original = R.API.GetSlotInfo; R.API.GetSlotInfo = function(bag, slot) if bag == 0 and slot == 2 then error("Unknown") end; return original(bag, slot) end
+ assert(not R.InventoryPlan:Forecast("sale", "").known)
+end)
+
+test("vendor private summary listener closing and reopening cannot issue old-batch followups", function()
+ local env, R = boot(); env.__bags[0].size = 4
+ env.__addItem(0, 1, 2030, 1, { quality = 0, sell = 3 }); env.__addItem(0, 2, 2031, 1, { quality = 0, sell = 4 })
+ env.MerchantFrame:Show(); env.__ev("MERCHANT_SHOW")
+ local interrupted = false
+ R:Listen("VENDOR_SUMMARY_CHANGED", function()
+  if not interrupted and R.VendorSession:Summary().observedStacks == 1 then
+   interrupted = true; env.__ev("MERCHANT_CLOSED"); env.__ev("MERCHANT_SHOW")
+  end
+ end)
+ R.Junk:SellAll(); env.__tick(5)
+ assert(interrupted and #env.__used == 1 and R.VendorSession:Summary().observedStacks == 0 and env.__bags[0][2])
+end)
+
+test("Planning shows numeric bank lower bounds and unavailable bank quantities as Unknown", function()
+ local env, R = boot(); R.Planning:Show("restock")
+ local row = { itemID = 2420, target = 10, carried = 0, carriedKnown = false, remainingDeficit = 10, deficitKnown = false, availableBank = 3, bankKnown = false, availableBankLowerBound = true, plannedWithdraw = 0, reason = "Unknown Container" }
+ R.Planning.preview = { rows = { row }, moves = {}, executable = false, forecast = { known = false } }
+ R.Planning:Refresh()
+ assert(R.Planning.rows[1].text:GetText():find("Carried Unknown", 1, true))
+ assert(R.Planning.rows[1].detail:GetText():find("At Least 3 (Unknown Total)", 1, true) and not R.Planning.rows[1].detail:GetText():find("true", 1, true))
+ row.availableBank = nil; R.Planning:Refresh()
+ assert(R.Planning.rows[1].detail:GetText():find("Bank Unknown", 1, true) and not R.Planning.rows[1].detail:GetText():find("At Least", 1, true))
+end)
+
+
+test("requested vendor notifications revalidate whole sale and split eligibility before native APIs", function()
+ for _, partial in ipairs({ false, true }) do
+  local env, R = boot(); env.__addItem(0, 1, 2040, 20, { quality = 0, sell = 2, stack = 20 })
+  env.MerchantFrame:Show(); env.__ev("MERCHANT_SHOW")
+  if partial then R.Junk:SetKeep(2040, 7) end
+  local model = inventoryModel(env, R)
+  local changed = false
+  R:Listen("VENDOR_SUMMARY_CHANGED", function()
+   if not changed and R.Junk.saleState then changed = true; R.Junk:SetKeep(2040, 20) end
+  end)
+  R:Listen("ACTION_HISTORY_CHANGED", function()
+   local e = R.db.actionHistory[1]
+   if partial and e and e.action == "Split" and e.status == "Requested" then R.Junk:SetKeep(2040, 20) end
+  end)
+  R.Junk:SellAll(); model:tick(5)
+  assert(model.calls.sale == 0 and model.calls.split == 0 and env.__bags[0][1].count == 20)
+ end
+ local env, R, model = reserveFixture()
+ R:Listen("ACTION_HISTORY_CHANGED", function()
+  local e = R.db.actionHistory[1]
+  if e and e.action == "Split" and e.status == "Requested" and e.reason == "Place Split Stack In Empty Bag Slot" then env.__bags[0][1].count = 30 end
+ end)
+ R.Junk:SellAll(); model:tick(5)
+ assert(model.calls.pickup == 0 and model.calls.sale == 0, "changed source must be rejected before placement")
+end)
+
+test("restock before-placement carried growth kills exact deficit validation without over-target withdrawal", function()
+ local env, R, model = restockFixture(); local preview = R.Restock:Preview()
+ assert(R.Restock:Execute(preview)); model:frames(1)
+ env.__addItem(0, 3, 2000, 10, { stack = 15 })
+ model:frames(5)
+ local totals = R.InventoryPlan:Totals(R.InventoryPlan:Capture(R.API.InvBagList, false))
+ assert(totals[2000] == 17 and env.__bags[-1][1].count == 50 and not R.Restock.operation)
+end)
+
+test("forecast visible snapshots invalidate on keep rule protection or selection refresh", function()
+ local env, R = boot(); env.__addItem(0, 1, 2050, 10, { quality = 0, sell = 1, stack = 20 })
+ R.Planning:Show("forecast"); R.Planning:Run(); assert(R.Planning.result)
+ R.Junk:SetKeep(2050, 7); assert(not R.Planning.result)
+ R.Planning:Run(); assert(R.Planning.result)
+ R.settings.protectFavorites = not R.settings.protectFavorites; R:RequestRefresh(); assert(not R.Planning.result)
 end)

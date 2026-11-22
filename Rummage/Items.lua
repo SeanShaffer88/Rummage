@@ -55,6 +55,7 @@ function Items:Info(link)
 		type = itype or "",
 		sub = subType or "",
 		stack = maxStack or 1,
+		stackKnown = type(maxStack) == "number" and maxStack == maxStack and maxStack > 0 and maxStack < math.huge and maxStack == math.floor(maxStack),
 		equipLoc = equipLoc or "",
 		icon = icon,
 		sell = sellPrice or 0,

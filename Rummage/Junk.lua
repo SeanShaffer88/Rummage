@@ -29,17 +29,23 @@ end
 
 -- isLive=false for cached data (alts / bank away from the banker): Scrap inspects the
 -- given bag/slot in *your current* bags, so it must only receive real live locations.
+function Junk:Classify(e, isLive)
+ local override = R.db.junk[e.id]
+ if override ~= nil then return override, "Manual Override" end
+ if self:RuleMatch(e) then return true, "Enabled Rules (OR; No Priority Winner)" end
+ if ScrapAvailable() then
+  local bag, slot
+  if isLive ~= false then bag, slot = e.bag, e.slot end
+  local ok, result = pcall(_G.Scrap.IsJunk, _G.Scrap, e.id, bag, slot)
+  if ok then return result and true or false, "Scrap" end
+  return (e.quality or 1) == 0, "Poor Quality Fallback", "Scrap Unavailable: Plugin Error"
+ end
+ return (e.quality or 1) == 0, "Poor Quality Fallback"
+end
 function Junk:IsJunk(e, isLive)
-	local override = R.db.junk[e.id]
-	if override ~= nil then return override end
-	if self:RuleMatch(e) then return true end
-	if ScrapAvailable() then
-		local bag, slot
-		if isLive ~= false then bag, slot = e.bag, e.slot end
-		local ok, res = pcall(_G.Scrap.IsJunk, _G.Scrap, e.id, bag, slot)
-		if ok then return res and true or false end
-	end
-	return (e.quality or 1) == 0
+ local result, source, errorText = self:Classify(e, isLive)
+ e.junk, e.junkSource, e.junkError = result, source, errorText
+ return result
 end
 
 function Junk:Toggle(e)
@@ -116,7 +122,7 @@ function Junk:Plan(query)
  local entries, totals = self:Inventory()
  local budgets = {}
  for id, total in pairs(totals) do budgets[id] = math.max(0, total - (R.db.keepQuantities[id] or 0)) end
- local result = { query = query, rows = {}, matchedStacks = 0, matchedUnits = 0, sellUnits = 0, value = 0, retainedUnits = 0, excludedUnits = 0 }
+ local result = { query = query, entries = entries, rows = {}, matchedStacks = 0, matchedUnits = 0, sellUnits = 0, value = 0, retainedUnits = 0, excludedUnits = 0 }
  local list = {}
  for _, e in ipairs(entries) do
   if not query or R.Search:Matches(query, e) then
@@ -220,13 +226,21 @@ local function LogSale(it)
  return R.Buyback:AddSale(it[5] or "", it[6] or 1, it[3] or 0)
 end
 
-local merchantSession = 0
+local merchantSession, vendorSerial = 0, 0
 
+local function VendorFact(action, status, it, reason, saleLedgerID)
+ if R.VendorSession then R.VendorSession:Record(action, status, { session = it and it.vendorSession,
+  operationID = it and it.vendorOperationID, saleLedgerID = saleLedgerID, itemID = it and it.id, link = it and it[5],
+  count = it and (it.sellCount or it[6]), value = it and (it.unitValue or 0) * (it.sellCount or it[6]), reason = reason,
+  slotsFreed = it and (it.split and 0 or 1), slotsConsumed = action == "Split" and 1 or nil }) end
+end
 local function History(status, it, reason, saleLedgerID)
+ VendorFact("Sale", status, it, reason, saleLedgerID)
  return R.ActionHistory:Record("Sale", status, { itemID = it and it.id, link = it and it[5],
   count = it and (it.sellCount or it[6]), value = it and it[3], reason = reason, saleLedgerID = saleLedgerID,
   from = it and (it[1] .. ":" .. it[2]), to = "Merchant" })
 end
+
 local function CursorMatches(it)
  local kind, id, link = GetCursorInfo()
  return kind == "item" and id == it.id and (not link or link == it[5])
@@ -260,20 +274,27 @@ function Junk:SellAll(confirmed)
  if self.ticker or InCombatLockdown() or R.Mover:Busy() then return end
  if GetCursorInfo() then History("Stopped", nil, "Cursor Is Occupied"); R:Print("Put Down The Cursor Item Before Selling."); return end
  if confirmed == true then confirmed = self.pendingSale end
- local list, total
+ local list, total, analysis
+ local vendorToken = R.VendorSession and R.VendorSession:Token()
  if type(confirmed) == "table" then
   if confirmed ~= self.pendingSale or confirmed.session ~= merchantSession then return end
   list, total = confirmed.list, confirmed.total; self.pendingSale = nil
- else self.pendingSale = nil; list, total = self:Collect() end
+ else self.pendingSale = nil; list, total, analysis = self:Collect() end
+ if analysis and R.VendorSession then
+  for _, e in ipairs(analysis.entries or {}) do if e.junk then R.VendorSession:Record("Sale", "Candidate", { session = vendorToken, itemID = e.id }) end end
+ end
  if #list == 0 then History("Skipped", nil, "No Sellable Excess Junk"); R:Print("No junk to sell."); return end
  if not confirmed and self:NeedsConfirm(list, total) then
   self.pendingSale = { list = list, total = total, session = merchantSession }
   StaticPopup_Show("RUMMAGE_SELL_CONFIRM", #list, R.FormatMoney(total), self.pendingSale); return
  end
+ vendorSerial = vendorSerial + 1
+ for index, it in ipairs(list) do it.vendorSession, it.vendorOperationID = vendorToken, "sale:" .. vendorSerial .. ":" .. index end
  local session, i, sold, soldValue = merchantSession, 0, 0, 0
  local state = { phase = "Next", waits = 0 }
  self.saleState = state
  local function finish(reason)
+  if self.saleState ~= state then return end
   if self.ticker then self.ticker:Cancel(); self.ticker = nil end
   if state.ownedCursor and state.item and CursorMatches(state.item) then ClearCursor() end
   self.saleState, self.CancelSale = nil, nil
@@ -290,12 +311,13 @@ function Junk:SellAll(confirmed)
    if type(money) ~= "number" or type(state.beforeMoney) ~= "number" or money ~= state.beforeMoney + it.unitValue * it[6] then return end
    local saleID = LogSale({ it[1], it[2], it.unitValue * it[6], it[4], it[5], it[6] })
    sold, soldValue = sold + 1, soldValue + it.unitValue * it[6]
-   History("Observed", it, "Expected Inventory Decrease And Vendor Money Gain Verified", saleID)
    state.phase, state.item, state.waits = "Next", nil, 0
+   History("Observed", it, "Expected Inventory Decrease And Vendor Money Gain Verified", saleID)
    return true
   end
  end
  local function step()
+  if self.saleState ~= state then return end
   if not MerchantOpen() or session ~= merchantSession then return finish("Merchant Session Ended") end
   if InCombatLockdown() then return finish("Entered Combat") end
   if state.phase == "Cursor" then
@@ -309,7 +331,17 @@ function Junk:SellAll(confirmed)
    if CursorMatches(it) and link == it[5] and sourceExpected then
     if API.GetSlotInfo(state.destination[1], state.destination[2]) then return finish("Split Destination Changed") end
     state.ownedCursor = true
+    VendorFact("Split", "Requested", it, "Place Exact Split Stack")
+    if self.saleState ~= state then return end
     R.ActionHistory:Record("Split", "Requested", { itemID = it.id, link = it[5], count = state.amount, reason = "Place Split Stack In Empty Bag Slot" })
+    if self.saleState ~= state then return end
+    local freshLink, freshCount, _, _, freshLocked = API.GetSlotInfo(it[1], it[2])
+    local freshExpected = freshCount == it[6] - state.amount or (freshLocked and freshCount == it[6])
+    local _, totals = self:Inventory()
+    local heldOutsideBags = freshCount == it[6] - state.amount and state.amount or 0
+    if session ~= merchantSession or not MerchantOpen() or InCombatLockdown() or not CursorMatches(it)
+     or API.GetSlotInfo(state.destination[1], state.destination[2]) or freshLink ~= it[5] or not freshExpected
+     or ((totals[it.id] or 0) + heldOutsideBags - (R.db.keepQuantities[it.id] or 0) < state.amount) then return finish("Split Placement Context Changed") end
     API.PickupContainerItem(state.destination[1], state.destination[2])
     state.phase, state.waits = "Placement", 0
    else state.waits = state.waits + 1; if state.waits > 12 then return finish("Split Was Not Acknowledged") end end
@@ -320,10 +352,12 @@ function Junk:SellAll(confirmed)
    local source, remainder, _, _, sourceLocked = API.GetSlotInfo(it[1], it[2])
    if GetCursorInfo() and not CursorMatches(it) then return finish("Cursor Identity Changed") end
    if not GetCursorInfo() and not sourceLocked and source == it[5] and remainder == it[6] - state.amount and link == it[5] and count == state.amount and not locked then
+    VendorFact("Split", "Observed", it, "Verified Split Placement")
+    if self.saleState ~= state or merchantSession ~= session then return end
     R.ActionHistory:Record("Split", "Observed", { itemID = it.id, link = it[5], count = state.amount, reason = "Source And Destination Quantities Verified" })
     state.ownedCursor = nil
     state.item = { state.destination[1], state.destination[2], it.unitValue * state.amount, it[4], it[5], state.amount,
-     id = it.id, sellCount = state.amount, unitValue = it.unitValue, split = true }
+     id = it.id, sellCount = state.amount, unitValue = it.unitValue, split = true, vendorSession = it.vendorSession, vendorOperationID = it.vendorOperationID }
     state.phase, state.waits = "Validate", 0
    else state.waits = state.waits + 1; if state.waits > 12 then return finish("Split Placement Was Not Acknowledged") end end
    return
@@ -332,6 +366,8 @@ function Junk:SellAll(confirmed)
    if not observeSale(state.item) then state.waits = state.waits + 1; if state.waits > 12 then return finish("Sale Remains Unconfirmed") end; return end
   elseif GetCursorInfo() then return finish("Cursor Is Occupied") end
   for _ = 1, 10 do
+   if self.saleState ~= state then return end
+   if session ~= merchantSession then return finish("Merchant Session Ended") end
    if state.phase == "Next" then
     i = i + 1; state.item = list[i]
     if not state.item then return finish() end
@@ -347,7 +383,12 @@ function Junk:SellAll(confirmed)
      state.phase, state.item = "Next", nil
     else
      state.amount, state.destination, state.waits = amount, destination, 0
+     VendorFact("Split", "Requested", it, "Split Exact Approved Excess")
+     if self.saleState ~= state then return end
      R.ActionHistory:Record("Split", "Requested", { itemID = it.id, link = it[5], count = amount, reason = "Split Exact Approved Excess" })
+     if self.saleState ~= state then return end
+     local allowed = self:SaleAllowance(it)
+     if session ~= merchantSession or not MerchantOpen() or InCombatLockdown() or GetCursorInfo() or allowed < amount then return finish("Sale Changed Before Split Request") end
      API.SplitContainerItem(it[1], it[2], amount)
      state.ownedCursor = CursorMatches(it) or nil
      state.phase = "Cursor"; return
@@ -357,6 +398,10 @@ function Junk:SellAll(confirmed)
     History("Requested", it, "Vendor Sale Requested; Awaiting Inventory Change")
     local _, totals = self:Inventory()
     state.beforeTotal, state.beforeMoney = totals[it.id] or 0, GetMoney and GetMoney()
+    if self.saleState ~= state then return end
+    if session ~= merchantSession or not MerchantOpen() or InCombatLockdown() or GetCursorInfo() then return finish("Sale Context Changed Before Request") end
+    local allowed = self:SaleAllowance(it)
+    if allowed ~= it[6] then return finish("Sale Eligibility Or Reserve Changed Before Request") end
     API.UseContainerItem(it[1], it[2])
     state.phase, state.waits = "Sale", 0
     if not observeSale(it) then return end
