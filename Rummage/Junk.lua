@@ -217,16 +217,14 @@ function Junk:NeedsConfirm(list, total)
 end
 
 local function LogSale(it)
-	local log = R.db.junkLog
-	table.insert(log, 1, { t = time(), link = it[5] or "", count = it[6] or 1, value = it[3] or 0 })
-	for i = #log, 31, -1 do log[i] = nil end
+ return R.Buyback:AddSale(it[5] or "", it[6] or 1, it[3] or 0)
 end
 
 local merchantSession = 0
 
-local function History(status, it, reason)
+local function History(status, it, reason, saleLedgerID)
  return R.ActionHistory:Record("Sale", status, { itemID = it and it.id, link = it and it[5],
-  count = it and (it.sellCount or it[6]), value = it and it[3], reason = reason,
+  count = it and (it.sellCount or it[6]), value = it and it[3], reason = reason, saleLedgerID = saleLedgerID,
   from = it and (it[1] .. ":" .. it[2]), to = "Merchant" })
 end
 local function CursorMatches(it)
@@ -290,9 +288,9 @@ function Junk:SellAll(confirmed)
   local money = GetMoney and GetMoney()
   if API.GetSlotInfo(it[1], it[2]) == nil and (totals[it.id] or 0) == state.beforeTotal - it[6] then
    if type(money) ~= "number" or type(state.beforeMoney) ~= "number" or money ~= state.beforeMoney + it.unitValue * it[6] then return end
-   LogSale({ it[1], it[2], it.unitValue * it[6], it[4], it[5], it[6] })
+   local saleID = LogSale({ it[1], it[2], it.unitValue * it[6], it[4], it[5], it[6] })
    sold, soldValue = sold + 1, soldValue + it.unitValue * it[6]
-   History("Observed", it, "Expected Inventory Decrease And Vendor Money Gain Verified")
+   History("Observed", it, "Expected Inventory Decrease And Vendor Money Gain Verified", saleID)
    state.phase, state.item, state.waits = "Next", nil, 0
    return true
   end
@@ -370,72 +368,8 @@ function Junk:SellAll(confirmed)
  step()
 end
 
--- Buyback shortcut. Matches the logged item link against the merchant's buyback
--- list instead of trusting a slot number. UNVERIFIED on Forever 1.60.1: needs the
--- classic GetNumBuybackItems / GetBuybackItemLink / BuybackItem trio, guarded here.
-function Junk:Buyback(n)
-	if not MerchantOpen() then R:Print("Open a merchant to buy items back."); return end
-	if not (GetNumBuybackItems and GetBuybackItemLink and BuybackItem) then
-		R:Print("Buyback API not available on this client.")
-		return
-	end
-	local log = R.db.junkLog
-	if type(n) == "string" and n:lower() == "all" then
-		-- Plan first, then buy. BuybackItem is answered by the server later, so the
-		-- list does not shrink between calls: each buyback index is claimed once, and
-		-- indices are bought highest first so earlier ones cannot shift underneath.
-		local claimed, picks = {}, {}
-		local numBuyback = GetNumBuybackItems() or 0
-		for i = 1, #log do
-			for b = 1, numBuyback do
-				if not claimed[b] and GetBuybackItemLink(b) == log[i].link then
-					claimed[b] = true
-					picks[#picks + 1] = { index = b, log = i }
-					break
-				end
-			end
-		end
-		table.sort(picks, function(a, b) return a.index > b.index end)
-		local confirmedHits, requested, budget = {}, 0, GetMoney()
-		for _, pick in ipairs(picks) do
-			local price = GetBuybackItemInfo and select(3, GetBuybackItemInfo(pick.index))
-			if not price or price <= budget then
-				local before = GetNumBuybackItems() or 0
-				R.ActionHistory:Record("Buyback", "Requested", { link = log[pick.log].link, count = log[pick.log].count, reason = "Merchant Buyback Requested" })
-				BuybackItem(pick.index)
-				requested = requested + 1
-				if price then budget = budget - price end
-				if (GetNumBuybackItems() or 0) < before then
-					confirmedHits[#confirmedHits + 1] = pick.log
-					R.ActionHistory:Record("Buyback", "Observed", { link = log[pick.log].link, count = log[pick.log].count, reason = "Buyback List Decreased" })
-				end
-			else R.ActionHistory:Record("Buyback", "Skipped", { link = log[pick.log].link, reason = "Insufficient Funds" }) end
-		end
-		table.sort(confirmedHits, function(a, b) return a > b end)
-		for _, i in ipairs(confirmedHits) do table.remove(log, i) end
-		R:Print(requested > 0 and ("Requested buyback of " .. requested .. " item(s). Unconfirmed sales remain in the log.") or "No matching affordable items in buyback.")
-		return
-	end
-	n = tonumber(n) or 1
-	local want = log[n]
-	if not want then R:Print("No such sale in the log (/rum junklog)."); return end
-	for i = 1, GetNumBuybackItems() or 0 do
-		if GetBuybackItemLink(i) == want.link then
-			local price = GetBuybackItemInfo and select(3, GetBuybackItemInfo(i))
-			if price and price > GetMoney() then R.ActionHistory:Record("Buyback", "Skipped", { link = want.link, reason = "Insufficient Funds" }); R:Print("Not enough money to buy that item back."); return end
-			local before = GetNumBuybackItems() or 0
-			R.ActionHistory:Record("Buyback", "Requested", { link = want.link, count = want.count, reason = "Merchant Buyback Requested" })
-			BuybackItem(i)
-			if (GetNumBuybackItems() or 0) < before then
-				R.ActionHistory:Record("Buyback", "Observed", { link = want.link, count = want.count, reason = "Buyback List Decreased" })
-				table.remove(log, n)
-				R:Print("Bought back " .. want.link .. ".")
-			else R:Print("Requested buyback of " .. want.link .. ". Sale remains in the log until confirmed.") end
-			return
-		end
-	end
-	R:Print("That item is no longer in the merchant's buyback list.")
-end
+-- Public slash compatibility; canonical buyback state lives in its own domain module.
+function Junk:Buyback(n) return R.Buyback:Command(n) end
 
 function Junk:PrintLog()
 	local log = R.db.junkLog

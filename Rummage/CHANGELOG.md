@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.12.1 — 2026-11-21
+
+**Added**
+- **Buy Back from History**: Observed Sale rows offer a guarded action for the exact logged stack. Pending, unavailable, ambiguous, insufficient-funds and busy states are explicit; large text keeps the action separate from row details.
+
+**Fixed**
+- Buyback requests are serialized and confirmed only after the exact merchant signature decreases, the matching inventory quantity returns and the known price leaves your money. Delayed/out-of-order events are supported; failed or interrupted requests retain their sale records.
+- Stable local sale-ledger IDs prevent history paging, row refreshes, ledger reordering or reloads from buying a different sale. Unknown quantities/prices and ambiguous legacy records remain unavailable.
+- Bank transfers check their session before acknowledging queued moves. Mail/trade placement stops across target/tab close-reopen, combat and cursor boundaries and revalidates stack count and bound state.
+- Release publication verifies existing source contents and actual ZIP/checksum consistency before adding only missing assets; valid reruns succeed without overwriting published assets. UTF-8 text allows only the documented CRLF-to-LF comparison exception; binary assets stay byte-exact.
+
+**Verification**
+- 122 offline Lua 5.1 cases and 19 offline publication-helper cases pass. New buyback and bank/mail/trade scenarios are synthetic stateful evidence; real-client followup checks were unperformed at the user's request for offline testing only.
+
 ## 1.12.0 — 2026-11-21
 
 **Added**

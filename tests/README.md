@@ -38,3 +38,14 @@ including delayed/rejected requests. Native Tools cases exercise preview consent
 reserve removal, history filtering/paging/confirmed clearing, nine context callbacks,
 font sizes 6..24 and bounded responsive geometry. This remains a mock client;
 observed fixture acknowledgements are not claims about live server behavior.
+
+
+The 1.12.1 followup suite has 122 cases. Buyback fixtures independently deliver
+merchant-list, bag-quantity and money changes in different orders; they also model
+wrong/no acknowledgements, stale identifiers, listener reentrancy, interruption and
+UI Pending/Unavailable states. Expanded bank/mail/trade cases cover exact placement,
+stack merging, delayed and rejected acknowledgements, lifecycle/session changes,
+full targets, bound/changed source stacks, combat and cursor recovery. Publication
+helper tests run separately: `python3 -I tools/tests/test_publish_release.py`.
+All new scenarios are offline evidence; consult `docs/FOREVER-MANUAL-CHECKLIST.md`
+for explicitly unperformed real-client checks.

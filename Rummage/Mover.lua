@@ -12,6 +12,7 @@ R.Mover = Mover
 
 local MAX_STEPS = 400
 local LOCK_TIMEOUT = 3
+local plannerContexts = setmetatable({}, { __mode = "k" })
 Mover.bankSession = 0
 R:RegisterEvent("BANKFRAME_OPENED", function() Mover.bankSession = Mover.bankSession + 1 end)
 R:RegisterEvent("BANKFRAME_CLOSED", function() Mover.bankSession = Mover.bankSession + 1 end)
@@ -29,7 +30,7 @@ local function IsLocked(bag, slot)
 	return locked
 end
 
-function Mover:Busy() return self:IsShown() or self.sendTicker ~= nil or (R.Junk and R.Junk.ticker ~= nil) end
+function Mover:Busy() return self:IsShown() or self.sendTicker ~= nil or (R.Junk and R.Junk.ticker ~= nil) or (R.Buyback and R.Buyback.operation ~= nil) end
 
 function Mover:Start(planner, label, onDone)
 	if InCombatLockdown() then
@@ -42,6 +43,7 @@ function Mover:Start(planner, label, onDone)
 	end
 	if GetCursorInfo() then return R:Print("Put down the cursor item before moving items.") end
 	self.planner = planner
+	self.contextValid = plannerContexts[planner]
 	self.label = label
 	self.onDone = onDone
 	self.steps = 0
@@ -69,6 +71,7 @@ Mover:SetScript("OnUpdate", function(self, elapsed)
 	self.wait = self.wait - elapsed
 	if self.wait > 0 then return end
 	if InCombatLockdown() then return self:Stop("Stopped: entered combat.") end
+	if self.contextValid and not self.contextValid() then return self:Stop("Stopped: bank session ended.") end
 
 	if GetCursorInfo() then return self:Stop("Stopped: cursor is occupied.") end
 
@@ -123,7 +126,7 @@ end
 -- Merge partial stacks of the same item within the given bags.
 function Mover:PlanRestack(bags)
 	local bankValid = BankCheck(bags)
-	return function()
+	local function plan()
 		if not bankValid() then return nil, "Stopped: bank session ended." end
 		local partial = {}
 		for _, bag in ipairs(bags) do
@@ -151,6 +154,8 @@ function Mover:PlanRestack(bags)
 		end
 		return nil
 	end
+	plannerContexts[plan] = bankValid
+	return plan
 end
 
 -- Finds a destination for link/id/count among target bags: a partial stack with room, else a free slot.
@@ -197,7 +202,7 @@ function Mover:PlanTransfer(sources, targets)
 	end
 	local bankValid = BankCheck(targets, snapshot)
 	local i = 0
-	return function()
+	local function plan()
 		if not bankValid() then return nil, "Stopped: bank session ended." end
 		while true do
 			i = i + 1
@@ -214,6 +219,8 @@ function Mover:PlanTransfer(sources, targets)
 			end
 		end
 	end
+	plannerContexts[plan] = bankValid
+	return plan
 end
 
 local function others(list, except)
@@ -281,7 +288,8 @@ Mover.targets = TARGETS
 
 -- Footers re-check the target when these windows open/close (and when the mail
 -- window switches between Inbox and Send, which fires no event).
-local function TargetsChanged() R:Fire("MOVER_CHANGED", Mover:Busy()) end
+local targetSession = 0
+local function TargetsChanged() targetSession = targetSession + 1; R:Fire("MOVER_CHANGED", Mover:Busy()) end
 local function HookShowHide(frame)
 	if frame and not frame.rummageTargetHook and frame.HookScript then
 		frame.rummageTargetHook = true
@@ -291,8 +299,8 @@ local function HookShowHide(frame)
 end
 for _, ev in ipairs({ "MAIL_SHOW", "MAIL_CLOSED", "TRADE_SHOW", "TRADE_CLOSED" }) do
 	R:RegisterEvent(ev, function()
-		HookShowHide(_G.SendMailFrame)
-		C_Timer.After(0, TargetsChanged)
+		HookShowHide(_G.SendMailFrame); HookShowHide(_G.MailFrame); HookShowHide(_G.TradeFrame)
+		TargetsChanged()
 	end)
 end
 
@@ -315,6 +323,8 @@ function Mover:SendTo(kind, entries)
 	if InCombatLockdown() then return R:Print("Can't move items in combat.") end
 	if self:Busy() then return R:Print("Already moving items; please wait.") end
 	if GetCursorInfo() then return R:Print("Put down the cursor item before moving items.") end
+	HookShowHide(_G.SendMailFrame); HookShowHide(_G.MailFrame); HookShowHide(_G.TradeFrame)
+	local session = targetSession
 	local sources = {}
 	for _, e in ipairs(entries) do
 		if not e.bound and not e.foreign then
@@ -336,6 +346,9 @@ function Mover:SendTo(kind, entries)
 	end
 	local function step()
 		local action = kind == "mail" and "Mail" or "Trade"
+		if targetSession ~= session or not t.open() or InCombatLockdown() or GetCursorInfo() then
+			R.ActionHistory:Record(action, "Stopped", { reason = "Target Session Ended, Combat Or Cursor Occupied" }); return finish()
+		end
 		if pending then
 			local link = API.GetSlotInfo(pending.src[1], pending.src[2])
 			if not link and t.matches(pending.index, pending.src[3], pending.src[4]) then
@@ -352,8 +365,8 @@ function Mover:SendTo(kind, entries)
 		i = i + 1
 		local src = sources[i]
 		if not src then return finish() end
-		local link, _, _, _, locked = API.GetSlotInfo(src[1], src[2])
-		if link ~= src[3] or locked then R.ActionHistory:Record(action, "Skipped", { link = src[3], reason = "Source Changed Or Locked" }); return end
+		local link, count, _, _, locked, _, bound = API.GetSlotInfo(src[1], src[2])
+		if link ~= src[3] or count ~= src[4] or locked or bound then R.ActionHistory:Record(action, "Skipped", { link = src[3], reason = "Source Changed Or Locked" }); return end
 		local idx = FreeTargetSlot(t)
 		if not idx then full = true; R.ActionHistory:Record(action, "Skipped", { link = src[3], reason = "Target Is Full; Item Stayed In Bags" }); return finish() end
 		R.ActionHistory:Record(action, "Requested", { link = src[3], from = src[1] .. ":" .. src[2], to = tostring(idx), reason = "Awaiting Attachment Placement; Not Sent Or Accepted" })

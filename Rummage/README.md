@@ -124,7 +124,7 @@ Diagnostics: `/fdebug` (or `/rum debug`) toggles an overlay with memory, frame t
 
 ## Mail, gold and diagnostics (1.6.0)
 
-`/rum mail` lists characters whose cached mail is close to expiring (also warned at login; Settings > Safety). `/rum gold` shows each character's gold with 7 and 30 day change. `/rum perf` times a refresh and a scan. `/rum apicheck export` opens the API report to copy. `/rum buyback all` buys back every logged sale still on offer. With Auctionator, item tooltips say whether the vendor or the auction house pays more.
+`/rum mail` lists characters whose cached mail is close to expiring (also warned at login; Settings > Safety). `/rum gold` shows each character's gold with 7 and 30 day change. `/rum perf` times a refresh and a scan. `/rum apicheck export` opens the API report to copy. `/rum buyback all` requests verifiable logged sales one at a time. A sale leaves the log only after matching merchant, inventory and money changes are observed. With Auctionator, item tooltips say whether the vendor or the auction house pays more.
 
 ## Keyboard (1.5.0)
 
@@ -169,3 +169,6 @@ Keep Quantities apply per item ID across your current bags; bank, mail, guild st
 Profiles maps the existing nine spec/instance contexts to saved profiles. Instance type takes precedence, then spec, then World outside instances. Combat defers switching; missing profiles are shown as Unavailable. Rules, reserves and context maps are account-wide, while profiles remain settings snapshots.
 
 With Colourblind-Safe Quality Tags enabled, grid cells add F1–F8 (favorite), J (junk), and Q0–Q7 (Poor through Heirloom). High-contrast text and existing shapes remain together. The effective minimum grid size is 48 pixels and grows for large fonts; the saved icon size stays unchanged. Tools and shared menus use font-derived layout and paged lists; 1280×720 and 1920×1080 are the tested viewport sizes.
+
+
+Observed Sale rows in History now have **Buy Back** actions. Open the merchant and hover a disabled action for its reason. The action always re-resolves the exact link, stack quantity and price; unknown or ambiguous older records stay unavailable. A pending request blocks other inventory automation, and closing/reopening the merchant, combat or a cursor interruption stops it safely. History clearing does not remove the independent sale ledger.

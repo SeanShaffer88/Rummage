@@ -105,8 +105,10 @@ function Tools:Layout()
 	for _, page in pairs(self.pages) do
 		for i, row in ipairs(page.rows or {}) do
 			Place(row, 14, rowY + (i - 1) * (rowH + 2), width - 28, rowH)
-			Place(row.text, 0, 0, width - 38, line)
-			Place(row.detail, 0, line + 4, width - 38, line)
+			local actionWidth = row.buyBack and math.max(90, font * 5.5 + 28) or 0
+			Place(row.text, 0, 0, width - 38 - actionWidth - (row.buyBack and 10 or 0), line)
+			Place(row.detail, 0, line + 4, width - 38 - actionWidth - (row.buyBack and 10 or 0), line)
+			if row.buyBack then SizeButton(row.buyBack, width - 28 - actionWidth, (rowH - control) / 2, actionWidth, control, line) end
 		end
 	end
 	local profileH = control + gap
@@ -211,13 +213,17 @@ function Tools:ChooseProfile(key, anchor)
 	W:Menu(anchor, menu)
 end
 
-local function Rows(parent, startY)
+local function Rows(parent, startY, buyback)
 	local rows = {}
 	for i = 1, MAX_ROWS do
 		local row = CreateFrame("Button", nil, parent)
 		row:SetSize(WIDTH - 28, 40); row:SetPoint("TOPLEFT", 14, startY - (i - 1) * 42)
 		row.text = Text(row, "", 0, 0, WIDTH - 38, "small")
 		row.detail = Text(row, "", 0, -18, WIDTH - 38, "small")
+		if buyback then
+			row.buyBack = Button(row, "Buy Back", WIDTH - 150, 3, 120, function() end)
+			row.buyBack:Hide()
+		end
 		W:SetTooltip(row, function(self) return self.text:GetText() end, function(self) return self.detail:GetText() end)
 		row:SetScript("OnClick", function(self)
 			if Tools.current == "keep" and self.record then
@@ -297,7 +303,7 @@ function Tools:Create()
 		W:Menu(b, menu)
 	end)
 	self.clearHistory = Button(history, "Clear History", WIDTH - 132, -86, 118, function() StaticPopup_Show("RUMMAGE_CLEAR_HISTORY") end)
-	history.rows = Rows(history, -202)
+	history.rows = Rows(history, -202, true)
 	StaticPopupDialogs.RUMMAGE_CLEAR_HISTORY = {
 		text = "Clear Rummage Action History? This Cannot Be Undone.", button1 = YES, button2 = CANCEL,
 		OnAccept = function() R.ActionHistory:Clear(); Tools.selectedID = nil; Tools:Refresh() end,
@@ -323,8 +329,13 @@ function Tools:Create()
 		self.profileRows[i] = row
 	end
 	R:Listen("ACTION_HISTORY_CHANGED", function() if Tools.frame:IsShown() and Tools.current == "history" then Tools:Refresh() end end)
+	for _, message in ipairs({ "BUYBACK_CHANGED", "MERCHANT_CHANGED", "MONEY_CHANGED", "MOVER_CHANGED" }) do
+		R:Listen(message, function() if Tools.frame:IsShown() and Tools.current == "history" then Tools:Refresh() end end)
+	end
 	R:RegisterEvent("DISPLAY_SIZE_CHANGED", function() if Tools.frame:IsShown() then Tools:Refresh(); Tools:ApplyPosition() end end)
-	R:RegisterEvent("PLAYER_REGEN_ENABLED", function() if Tools.frame:IsShown() and Tools.current == "profiles" then Tools:Refresh() end end)
+ for _, event in ipairs({ "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED", "CURSOR_CHANGED" }) do
+  R:RegisterEvent(event, function() if Tools.frame:IsShown() and (Tools.current == "history" or Tools.current == "profiles") then Tools:Refresh() end end)
+ end
 end
 
 function Tools:Refresh()
@@ -379,6 +390,21 @@ function Tools:Refresh()
 		local record = i <= self.pageSize and records[self.current == "history" and i or ((self.page - 1) * self.pageSize + i)] or nil
 		row.record = record
 		row:SetShown(record ~= nil)
+		if row.buyBack then
+			local isSale = record and record.action == "Sale" and record.status == "Observed"
+			row.buyBack:SetShown(isSale and true or false)
+			if isSale then
+				local id = record.id
+				local allowed, reason = R.Buyback:Availability(id)
+				row.buyBack:SetLabel(reason == "Pending" and "Pending" or "Buy Back")
+				row.buyBack:SetDisabledLook(not allowed)
+				W:SetTooltip(row.buyBack, "Buy Back", reason or "Buy This Exact Observed Sale Back From The Open Merchant")
+				row.buyBack:SetScript("OnClick", function()
+					local ok, errorText = R.Buyback:FromHistory(id)
+					if not ok then Tools:SetStatus(errorText or "Buyback Unavailable") end
+				end)
+			end
+		end
 		if record then
 			if self.current == "preview" then
 				row.text:SetText(ItemText(record.id, record.link) .. "  ×" .. tostring(record.count or 0))

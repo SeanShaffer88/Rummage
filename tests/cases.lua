@@ -275,8 +275,8 @@ test("buyback matches by link, guards a missing API", function()
   local env, R = boot()
   env.MerchantFrame.shown = true
   table.insert(R.db.junkLog, 1, { t = env.__now, link = "[Rag]", count = 1, value = 50 })
-  env.__buyback = { { link = "[Other]" }, { link = "[Rag]" } }
-  R.Junk:Buyback(1)
+  env.__buyback = { { link = "[Other]", price = 1, count = 1 }, { link = "[Rag]", price = 50, count = 1 } }
+  R.Junk:Buyback(1); env.__tick(2)
   assert(env.__bought and env.__bought[1].link == "[Rag]" and #R.db.junkLog == 0)
   local saved = env.BuybackItem
   env.BuybackItem = nil
@@ -604,11 +604,12 @@ test("buyback all claims each buyback slot once and buys highest index first", f
     { t = 1, link = "[Rag]", count = 1, value = 5 },
     { t = 1, link = "[Rock]", count = 1, value = 5 },
   }
-  env.__buyback = { { link = "[Rag]" }, { link = "[Other]" }, { link = "[Rock]" } }
+  env.__buyback = { { link = "[Rag]", count = 1, price = 5 }, { link = "[Other]", count = 1, price = 5 }, { link = "[Rock]", count = 1, price = 5 } }
   local calls = {}
   env.BuybackItem = function(i) calls[#calls + 1] = i end   -- server answers later: list unchanged
   R.Junk:Buyback("all")
-  assert(#calls == 2 and calls[1] == 3 and calls[2] == 1, "calls " .. table.concat(calls, ","))
+  assert(#calls == 1 and calls[1] == 1, "only one request before acknowledgement")
+  env.__tick(30); assert(#calls == 1 and not R.Buyback.operation, "no unconfirmed followup request")
   assert(#R.db.junkLog == 3, "unconfirmed requests must retain sale history")
 end)
 
@@ -1622,11 +1623,12 @@ end)
 test("failed or unaffordable buyback preserves history", function()
   local env, R = boot(); env.MerchantFrame:Show()
   R.db.junkLog = { { t = 1, link = "[Rag]", count = 1, value = 5 } }
-  env.__buyback = { { link = "[Rag]" } }
+  env.__buyback = { { link = "[Rag]", count = 1, price = 5 } }
   local calls = 0
   env.BuybackItem = function() calls = calls + 1 end
   R.Junk:Buyback(1)
-  assert(calls == 1 and #R.db.junkLog == 1 and chatHas(env, "Requested buyback"))
+  assert(calls == 1 and #R.db.junkLog == 1)
+  env.__tick(30)
   env.GetBuybackItemInfo = function() return "Rag", nil, 100, 1 end
   env.GetMoney = function() return 5 end
   R.Junk:Buyback(1); R.Junk:Buyback("all")
@@ -1691,6 +1693,8 @@ local function inventoryModel(env, R, options)
     end
     env.__bags[bag][slot] = { link = h.link, id = h.id, count = h.count, quality = h.quality }
     model.held = nil
+   elseif model.held and s and model.held.link == s.link then
+    s.count = s.count + model.held.count; model.held = nil
    elseif not model.held and s then
     model.held = { link = s.link, id = s.id, count = s.count, quality = s.quality, source = { bag, slot } }
     env.__bags[bag][slot] = nil
@@ -2241,4 +2245,346 @@ test("chrome sizing measures intrinsic labels instead of feedback from clipped r
  assert(R.Widgets:MeasureText(source) == 75)
  source.GetUnboundedStringWidth = function() error("unsupported runtime call") end
  assert(R.Widgets:MeasureText(source) == #source:GetText() * 23 * 0.6)
+end)
+
+
+-- Confirmed buyback fixture: three independent server evidence channels.
+local function buybackFixture(options)
+ options = options or {}
+ local env, R = boot(); env.MerchantFrame:Show(); env.__money = 1000
+ local link = env.__addItem(0, 1, 1900, 2, { name = "Recovered Cloth", sell = 5, stack = 20 }); env.__bags[0][1] = nil
+ local id = R.Buyback:AddSale(link, 2, 10)
+ local record = R.ActionHistory:Record("Sale", "Observed", { link = link, count = 2, value = 10, saleLedgerID = id })
+ env.__buyback = { { link = link, count = 2, price = 10 } }
+ local model = { requests = {}, link = link, id = id, historyID = record.id }
+ function model:channel(request, kind)
+  if request[kind] then return end; request[kind] = true
+  local item = request.item
+  if kind == "list" then for i, candidate in ipairs(env.__buyback) do if candidate == item then table.remove(env.__buyback, i); break end end
+  elseif kind == "bag" then
+   local count = options.wrongCount and 1 or item.count
+   local recovered = options.wrongItem and "item:9999" or item.link
+   for slot = 1, env.__bags[0].size do if not env.__bags[0][slot] then env.__bags[0][slot] = { link = recovered, count = count, id = 1900, quality = 1 }; break end end
+  else env.__money = env.__money - (options.wrongMoney and item.price + 1 or item.price) end
+ end
+ function model:ack(order)
+  local request = self.requests[#self.requests]
+  for _, channel in ipairs(order or { "list", "bag", "money" }) do self:channel(request, channel); env.__ev("MERCHANT_UPDATE") end
+ end
+ env.BuybackItem = function(index)
+  local request = { index = index, item = env.__buyback[index] }; model.requests[#model.requests + 1] = request
+  if options.sync then model:ack() end
+ end
+ return env, R, model
+end
+
+test("buyback observes synchronous and every asynchronous evidence ordering exactly once", function()
+ for _, order in ipairs({ { "list", "bag", "money" }, { "money", "bag", "list" }, { "bag", "list", "money" } }) do
+  local env, R, m = buybackFixture()
+  assert(R.Buyback:FromHistory(m.historyID)); assert(#m.requests == 1 and #R.db.junkLog == 1)
+  m:channel(m.requests[1], order[1]); env.__ev("PLAYER_MONEY"); assert(#R.db.junkLog == 1)
+  m:channel(m.requests[1], order[2]); env.__ev("BAG_UPDATE_DELAYED"); assert(#R.db.junkLog == 1)
+  m:channel(m.requests[1], order[3]); env.__ev("MERCHANT_UPDATE")
+  assert(#R.db.junkLog == 0 and not R.Buyback.operation and historyHas(R, "Buyback", "Observed"))
+  env.__tick(30); assert(#m.requests == 1 and env.__money == 990)
+ end
+ local env, R, m = buybackFixture({ sync = true }); R.Junk:Buyback(1)
+ assert(#m.requests == 1 and #R.db.junkLog == 0 and not R.Buyback.operation)
+end)
+
+test("buyback requires exact signature inventory quantity and money without burst-event timeout", function()
+ for _, mode in ipairs({ "wrongCount", "wrongItem", "wrongMoney", "noop", "unrelated" }) do
+  local options = {}; options[mode] = true
+  local env, R, m = buybackFixture(options)
+  env.__buyback[2] = { link = "item:888", count = 1, price = 2 }
+  R.Junk:Buyback(1)
+  if mode == "unrelated" then table.remove(env.__buyback, 2)
+  elseif mode ~= "noop" then m:ack() end
+  for i = 1, 40 do env.__ev("MERCHANT_UPDATE"); env.__ev("BAG_UPDATE_DELAYED"); env.__ev("PLAYER_MONEY") end
+  assert(R.Buyback.operation and #R.db.junkLog == 1 and not historyHas(R, "Buyback", "Observed"), mode)
+  env.__tick(26)
+  assert(not R.Buyback.operation and #R.db.junkLog == 1 and historyHas(R, "Buyback", "Stopped"), mode)
+ end
+end)
+
+test("buyback rejects missing signature APIs unknown price count insufficient funds and occupied cursor", function()
+ for _, mode in ipairs({ "price", "count", "api", "funds", "cursor", "combat" }) do
+  local env, R, m = buybackFixture()
+  if mode == "price" then env.GetBuybackItemInfo = function() return "Cloth", 1, nil, 2 end
+  elseif mode == "count" then env.GetBuybackItemInfo = function() return "Cloth", 1, 10, nil end
+  elseif mode == "api" then env.GetBuybackItemInfo = nil
+  elseif mode == "funds" then env.__money = 1
+  elseif mode == "cursor" then env.GetCursorInfo = function() return "item", 9999 end
+  else env.__combat = true end
+  assert(not R.Buyback:Availability(m.historyID)); R.Buyback:FromHistory(m.historyID)
+  assert(#m.requests == 0 and #R.db.junkLog == 1 and not R.Buyback.operation, mode)
+ end
+end)
+
+test("buyback duplicate signatures serialize all and re-resolve shifting indices", function()
+ local env, R, m = buybackFixture({ sync = true })
+ local other = env.__addItem(0, 1, 1901, 1, { name = "Other", sell = 9 }); env.__bags[0][1] = nil
+ R.Buyback:AddSale(other, 1, 9); R.Buyback:AddSale(m.link, 2, 10)
+ env.__buyback = { { link = m.link, count = 1, price = 5 }, { link = m.link, count = 2, price = 10 }, { link = other, count = 1, price = 9 }, { link = m.link, count = 2, price = 10 } }
+ R.Junk:Buyback("all")
+ assert(#m.requests == 3 and m.requests[1].index == 4 and #R.db.junkLog == 0 and #env.__buyback == 1)
+ assert(env.__buyback[1].count == 1 and env.__money == 971)
+end)
+
+test("buyback pending rejects repeat clicks and stops on session combat cursor API or ledger loss", function()
+ for _, mode in ipairs({ "session", "combat", "cursor", "api", "ledger" }) do
+  local env, R, m = buybackFixture(); R.Buyback:FromHistory(m.historyID)
+  local op = R.Buyback.operation
+  assert(not R.Buyback:FromHistory(m.historyID)); R.Junk:Buyback("all"); assert(#m.requests == 1)
+  if mode == "session" then env.__ev("MERCHANT_CLOSED"); env.__ev("MERCHANT_SHOW")
+  elseif mode == "combat" then env.__combat = true
+  elseif mode == "cursor" then env.GetCursorInfo = function() return "item", 9999 end
+  elseif mode == "api" then env.GetBuybackItemInfo = nil
+  else R.db.junkLog = { { id = "sale:1:999", link = "item:123", count = 1, value = 1 } }; m:ack() end
+  env.__tick(2); R.Buyback:Check(op, true)
+  assert(not R.Buyback.operation and op.ticker.cancelled and #m.requests == 1 and not historyHas(R, "Buyback", "Observed"), mode)
+  if mode == "ledger" then assert(R.db.junkLog[1].id == "sale:1:999") end
+ end
+end)
+
+test("buyback removes stable ledger identity despite reorder and history clear", function()
+ local env, R, m = buybackFixture()
+ R.Buyback:FromHistory(m.historyID)
+ local extra = R.Buyback:AddSale("item:777", 1, 3)
+ R.ActionHistory:Clear(); m:ack()
+ assert(#R.db.junkLog == 1 and R.db.junkLog[1].id == extra and historyHas(R, "Buyback", "Observed"))
+end)
+
+test("ledger and history sanitizer retains stable links but disables corrupt or duplicate claims", function()
+ for _, corrupt in ipairs({ "bad", { false, 123, "bad" } }) do
+  local env, R = boot(function(e) e.RummageDB = { junkLog = { { id = "sale:1:1", t = 1, link = "item:1", count = 1, value = 2 } }, actionHistory = corrupt } end)
+  assert(#R.db.junkLog == 1 and #R.db.actionHistory == 0)
+ end
+ local env, R = boot(function(e)
+  e.RummageDB = { junkLog = { { id = "sale:1:1", t = 1, link = "item:1", count = 1, value = 2 }, { id = "sale:1:1", t = 2, link = "item:2", count = 1, value = 3 } },
+   actionHistory = { { id = 1, t = 1, action = "Sale", status = "Observed", link = "item:1", count = 1, value = 2, saleLedgerID = "sale:1:1" } } }
+ end)
+ assert(R.db.junkLog[1].id ~= R.db.junkLog[2].id and R.db.actionHistory[1].ledgerInvalid and not R.Buyback:Availability(R.db.actionHistory[1].id))
+ local e2, R2, m = buybackFixture()
+ R2.ActionHistory:Record("Sale", "Observed", { link = m.link, count = 2, value = 10 })
+ R2.ActionHistory:Record("Sale", "Observed", { link = m.link, count = 2, value = 10 })
+ assert(not R2.Buyback:Availability(R2.db.actionHistory[1].id))
+ assert(R2.Buyback:Availability(m.historyID)) -- the new linked sale remains unique
+end)
+
+test("history Buy Back captures record identity Pending and large-font trailing width", function()
+ local env, R, m = buybackFixture(); R.settings.fontSize = 24; R.Widgets:UpdateFonts(); env.UIParent:SetSize(1280, 720)
+ R.Tools:Show("history"); local row
+ for _, r in ipairs(R.Tools.rows) do if r.record and r.record.id == m.historyID then row = r end end
+ assert(row and row.buyBack:IsShown() and not row.buyBack.disabled)
+ assert(row.text:GetWidth() + row.buyBack:GetWidth() + 10 < row:GetWidth() and row.buyBack:GetHeight() >= 36)
+ local click = row.buyBack.scripts.OnClick
+ R.ActionHistory:Record("Transfer", "Skipped", { reason = "New Row" }); click()
+ assert(#m.requests == 1 and R.Buyback.operation.current.id == m.id)
+ R.Tools:Refresh(); local pending
+ for _, r in ipairs(R.Tools.rows) do if r.record and r.record.id == m.historyID then pending = r end end
+ assert(pending.buyBack.disabled and pending.buyBack.text:GetText() == "Pending")
+ click(); assert(#m.requests == 1); m:ack(); R.Tools:Refresh()
+ assert(not R.Buyback.operation)
+ for _, r in ipairs(R.Tools.rows) do if r.record and r.record.id == m.historyID then assert(r.buyBack.disabled and r.buyBack.tipBody:find("Already Bought", 1, true)) end end
+end)
+
+
+test("buyback notification reentrancy cannot issue a cancelled or superseded request", function()
+ local env, R, m = buybackFixture()
+ R:Listen("ACTION_HISTORY_CHANGED", function()
+  local row = R.db.actionHistory[1]
+  if row and row.action == "Buyback" and row.status == "Requested" then R.Buyback:Stop("Cancelled By Listener") end
+ end)
+ R.Buyback:FromHistory(m.historyID)
+ assert(#m.requests == 0 and not R.Buyback.operation and #R.db.junkLog == 1)
+ local e2, R2, m2 = buybackFixture()
+ local newSale = R2.Buyback:AddSale(m2.link, 2, 10)
+ e2.__buyback[2] = { link = m2.link, count = 2, price = 10 }
+ local replaced = false
+ R2:Listen("ACTION_HISTORY_CHANGED", function()
+  local row = R2.db.actionHistory[1]
+  if not replaced and row and row.action == "Buyback" and row.status == "Observed" then
+   replaced = true; R2.Buyback:Stop("Replaced"); R2.Buyback:Start({ newSale })
+  end
+ end)
+ R2.Buyback:Start({ m2.id, newSale }); local old = R2.Buyback.operation
+ m2:ack(); assert(replaced and #m2.requests == 2)
+ R2.Buyback:Check(old, true); assert(#m2.requests == 2)
+end)
+
+test("history buyback availability updates immediately on combat and cursor boundaries", function()
+ local env, R, m = buybackFixture(); R.Tools:Show("history")
+ local function button()
+  for _, row in ipairs(R.Tools.rows) do if row.record and row.record.id == m.historyID then return row.buyBack end end
+ end
+ assert(not button().disabled)
+ env.__combat = true; env.__ev("PLAYER_REGEN_DISABLED"); assert(button().disabled and button().tipBody:find("Combat", 1, true))
+ env.__combat = false; env.__ev("PLAYER_REGEN_ENABLED"); assert(not button().disabled)
+ env.GetCursorInfo = function() return "item", 9999 end; env.__ev("CURSOR_CHANGED"); assert(button().disabled)
+ env.GetCursorInfo = function() return nil end; env.__ev("CURSOR_CHANGED"); assert(not button().disabled)
+end)
+
+local function bankModel(options, merge)
+ local env, R = boot(); env.__bags[-1] = { size = 4 }
+ local link = env.__addItem(0, 1, 1910, 5, { name = "Bank Ore", stack = 20, sell = 1 })
+ if merge then env.__addItem(-1, 1, 1910, 3, { name = "Bank Ore", stack = 20, sell = 1 }) end
+ env.__ev("BANKFRAME_OPENED")
+ local model = inventoryModel(env, R, options)
+ function model:frames(n) for i = 1, n do self:tick(1); env.__update(0.2) end end
+ return env, R, model, link
+end
+
+test("bank transfers verify empty placement and exact partial-stack merge after acknowledgement", function()
+ for _, merge in ipairs({ false, true }) do
+  local env, R, model, link = bankModel(nil, merge)
+  local done = false
+  R.Mover:Start(R.Mover:PlanTransfer({ { 0, 1 } }, { -1 }), "bank", function() done = true end)
+  model:frames(4)
+  assert(done and not R.Mover:Busy() and not env.__bags[0][1] and env.__bags[-1][1].link == link)
+  assert(env.__bags[-1][1].count == (merge and 8 or 5) and historyHas(R, "Transfer", "Observed"))
+ end
+end)
+
+test("bank session and combat interruption precede queued acknowledgement and never resume old work", function()
+ for _, mode in ipairs({ "close", "combat", "cursor", "noack", "replaced", "count", "locked" }) do
+  local env, R, model = bankModel({ rejectPlace = mode == "noack" })
+  local done = false
+  local planner = R.Mover:PlanTransfer({ { 0, 1 } }, { -1 })
+  if mode == "replaced" then env.__addItem(0, 1, 9999, 5)
+  elseif mode == "count" then env.__bags[0][1].count = 6
+  elseif mode == "locked" then env.__bags[0][1].locked = true end
+  R.Mover:Start(planner, "bank", function() done = true end)
+  model:frames(1)
+  if mode == "close" then env.__ev("BANKFRAME_CLOSED"); env.__ev("BANKFRAME_OPENED")
+  elseif mode == "combat" then env.__combat = true
+  elseif mode == "cursor" then model.held = { link = "item:9999", id = 9999, count = 1 } end
+  model:frames(25)
+  assert(not R.Mover:Busy() and not historyHas(R, "Transfer", "Observed"), mode)
+  if mode == "close" or mode == "combat" or mode == "cursor" or mode == "noack" then assert(not done, mode) end
+ end
+end)
+
+local function targetModel(kind, options)
+ options = options or {}
+ local env, R = boot(); env.__bags[0].size = 8
+ local links = {}
+ for slot = 1, 3 do links[slot] = env.__addItem(0, slot, 1920 + slot, 2, { name = "Target" .. slot }) end
+ local target, pending, calls = {}, {}, {}
+ if kind == "mail" then
+  mailTarget(env); env.ATTACHMENTS_MAX_SEND = options.full and 1 or 12
+  env.GetSendMailItem = function(i) local e = target[i]; if e then return "Item", 1, 1, e.count end end
+  env.GetSendMailItemLink = function(i) return target[i] and target[i].link end
+  if options.missing then env.GetSendMailItemLink = nil end
+ else
+  env.TradeFrame = env.CreateFrame("Frame", "TradeFrame"); env.TradeFrame:Show(); env.MAX_TRADABLE_ITEMS = 7
+  env.GetTradePlayerItemLink = function(i) return target[i] and target[i].link end
+  env.GetTradePlayerItemInfo = function(i) local e = target[i]; if e then return "Item", 1, e.count end end
+  if options.missing then env.GetTradePlayerItemInfo = nil end
+ end
+ if options.full then for i = 1, kind == "mail" and 1 or 6 do target[i] = { link = "item:888", count = 1 } end end
+ local function place(i)
+  calls[#calls + 1] = i
+  local source = env.__picked; local item = env.__bags[source[1]][source[2]]
+  pending[#pending + 1] = function()
+   env.__bags[source[1]][source[2]] = nil
+   target[i] = { link = options.wrong and "item:999" or item.link, count = item.count }
+  end
+  if not options.delay and not options.noack then table.remove(pending, 1)() end
+ end
+ if kind == "mail" then env.ClickSendMailItemButton = place else env.ClickTradeButton = place end
+ local entries = {}; for i = 1, 3 do entries[i] = { link = links[i], slots = { { 0, i } } } end
+ return env, R, entries, target, pending, calls
+end
+
+test("mail and trade serialize exact attachment observation and trade excludes the seventh slot", function()
+ for _, kind in ipairs({ "mail", "trade" }) do
+  local env, R, entries, target, pending, calls = targetModel(kind, { delay = true })
+  R.Mover:SendTo(kind, entries); assert(#calls == 1)
+  for step = 1, 3 do table.remove(pending, 1)(); env.__tick(1) end
+  env.__tick(2)
+  assert(#calls == 3 and not R.Mover:Busy() and historyHas(R, kind == "mail" and "Mail" or "Trade", "Observed"))
+  for _, i in ipairs(calls) do assert(i <= (kind == "mail" and 12 or 6)) end
+  local e2, R2, list, _, _, attempts = targetModel(kind, { full = true })
+  R2.Mover:SendTo(kind, list); assert(#attempts == 0 and not R2.Mover:Busy())
+ end
+end)
+
+test("mail and trade session target and source changes stop before old acknowledgement", function()
+ for _, kind in ipairs({ "mail", "trade" }) do
+  for _, mode in ipairs({ "close", "combat", "cursor", "wrong", "missing", "noack", "bound", "count" }) do
+   local opts = { delay = true }; opts[mode] = true
+   local env, R, entries, target, pending, calls = targetModel(kind, opts)
+   R.Mover:SendTo(kind, entries)
+   if mode == "close" then
+    if kind == "mail" then env.SendMailFrame:Hide(); env.SendMailFrame:Show() else env.TradeFrame:Hide(); env.TradeFrame:Show() end
+   elseif mode == "combat" then env.__combat = true
+   elseif mode == "cursor" then env.GetCursorInfo = function() return "item", 9999 end
+   elseif mode == "bound" then env.__bags[0][2].bound = true
+   elseif mode == "count" then env.__bags[0][2].count = 3 end
+   if mode ~= "noack" then table.remove(pending, 1)() end
+   env.__tick(30)
+   assert(not R.Mover:Busy(), kind .. mode)
+   if mode == "close" or mode == "combat" or mode == "cursor" or mode == "wrong" or mode == "missing" or mode == "noack" then
+    assert(#calls == 1 and not historyHas(R, kind == "mail" and "Mail" or "Trade", "Observed"), kind .. mode)
+   else assert(#calls <= 2, kind .. mode) end
+  end
+ end
+end)
+
+
+test("bank delayed acknowledgement does not complete or advance while source remains locked", function()
+ local env, R, model, link = bankModel()
+ local held, waiting
+ R.API.PickupContainerItem = function(bag, slot)
+  if not held then
+   held = { bag = bag, slot = slot, item = env.__bags[bag][slot] }; held.item.locked = true
+  else waiting = { source = held, bag = bag, slot = slot }; held = nil end
+ end
+ local done = false
+ R.Mover:Start(R.Mover:PlanTransfer({ { 0, 1 } }, { -1 }), "bank", function() done = true end)
+ model:frames(2)
+ assert(waiting and not done and not historyHas(R, "Transfer", "Observed") and R.Mover:Busy())
+ local request = waiting; request.source.item.locked = nil
+ env.__bags[request.bag][request.slot] = request.source.item; env.__bags[request.source.bag][request.source.slot] = nil
+ model:frames(3)
+ assert(done and not R.Mover:Busy() and env.__bags[-1][1].link == link and historyHas(R, "Transfer", "Observed"))
+end)
+
+test("buyback ledger linkage survives startup without legacy ambiguity", function()
+ local env, R = boot(function(e)
+  e.RummageDB = { junkLog = { { id = "sale:1:99", t = 1, link = "item:1900", count = 2, value = 10 } },
+   actionHistory = { { id = 999, t = 1, action = "Sale", status = "Observed", link = "item:1900", count = 2, value = 10, saleLedgerID = "sale:1:99" } } }
+ end)
+ env.MerchantFrame:Show(); env.__buyback = { { link = "item:1900", count = 2, price = 10 } }
+ local id = R.db.actionHistory[1].id
+ assert(R.db.actionHistory[1].saleLedgerID == "sale:1:99" and R.Buyback:Availability(id))
+ R.Buyback:FromHistory(id); env.__tick(2)
+ assert(#R.db.junkLog == 0 and historyHas(R, "Buyback", "Observed"))
+end)
+
+test("buyback re-resolves merchant candidate after Requested listeners shift or replace its index", function()
+ for _, replace in ipairs({ false, true }) do
+  local env, R, m = buybackFixture()
+  R:Listen("ACTION_HISTORY_CHANGED", function()
+   local row = R.db.actionHistory[1]
+   if row and row.action == "Buyback" and row.status == "Requested" then
+    if replace then env.__buyback[1] = { link = "item:999", count = 1, price = 1 }
+    else table.insert(env.__buyback, 1, { link = "item:999", count = 1, price = 1 }) end
+   end
+  end)
+  R.Buyback:FromHistory(m.historyID)
+  if replace then assert(#m.requests == 0 and not R.Buyback.operation)
+  else assert(#m.requests == 1 and m.requests[1].index == 2 and m.requests[1].item.link == m.link) end
+ end
+end)
+
+
+test("unknown merchant list size cannot confirm buyback despite inventory and money deltas", function()
+ for _, size in ipairs({ false, -1, 0.5, math.huge, 101 }) do
+  local env, R, m = buybackFixture(); R.Buyback:FromHistory(m.historyID)
+  env.GetNumBuybackItems = function() return size ~= false and size or nil end
+  m:ack(); env.__tick(2)
+  assert(#R.db.junkLog == 1 and not historyHas(R, "Buyback", "Observed") and not R.Buyback.operation, tostring(size))
+ end
 end)
