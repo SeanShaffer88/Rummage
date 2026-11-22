@@ -14,5 +14,7 @@ jobs:
       - run: pip install lupa
       - name: Gate (compile, TOC lint, headers, tests)
         run: python3 -I tools/check.py
+      - name: Publication helper tests (fake API only)
+        run: python3 -I tools/tests/test_publish_release.py
       - name: Package (dry run)
         run: sh tools/package.sh

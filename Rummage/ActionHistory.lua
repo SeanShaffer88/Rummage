@@ -11,6 +11,8 @@ local function text(v, limit) return type(v) == "string" and v:sub(1, limit) or 
 local function clean(e)
  if type(e) ~= "table" or not actions[e.action] or not statuses[e.status] or not number(e.t) then return end
  local c = { t = e.t, action = e.action, status = e.status }
+ if type(e.saleLedgerID) == "string" and #e.saleLedgerID <= 64 and e.saleLedgerID:match("^sale:%d+:%d+$") then c.saleLedgerID = e.saleLedgerID end
+ if e.ledgerInvalid == true then c.ledgerInvalid = true end
  for _, key in ipairs({ "itemID", "count", "value" }) do
   if number(e[key]) then c[key] = math.min(1000000000000, math.floor(e[key])) end
  end

@@ -721,6 +721,7 @@ function R:InitDB()
 		end
 	end
 	db.keepQuantities = keep
+	R.Buyback:SanitizeLedger(db)
 	R.ActionHistory:Sanitize(db)
 	-- v5 (1.9.1): categories become an icon rail for everyone once; the setting stays.
 	if (tonumber(db.version) or 0) < 5 then db.settings.compactSidebar = true end

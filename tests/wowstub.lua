@@ -358,7 +358,19 @@ function WOWSTUB(opts)
   env.GetNumBuybackItems = function() return #env.__buyback end
   env.GetBuybackItemLink = function(i) local b = env.__buyback[i]; return b and b.link end
   env.GetBuybackItemInfo = function(i) local b = env.__buyback[i]; if b then return nil, nil, b.price or 0, b.count or 1 end end
-  env.BuybackItem = function(i) env.__bought = env.__bought or {}; env.__bought[#env.__bought + 1] = table.remove(env.__buyback, i) end
+  env.BuybackItem = function(i)
+    local item = env.__buyback[i]; if not item then return end
+    local price, count = item.price or 0, item.count or 1
+    if env.GetMoney() < price then return end
+    for bag, b in pairs(env.__bags) do
+      if bag >= 0 then for slot = 1, b.size do if not b[slot] then
+        b[slot] = { link = item.link, count = count, id = tonumber(item.link:match("item:(%d+)")) or 1, quality = 1 }
+        env.__money = env.GetMoney() - price
+        env.__bought = env.__bought or {}; env.__bought[#env.__bought + 1] = table.remove(env.__buyback, i)
+        return
+      end end end
+    end
+  end
 
   return env
 end
