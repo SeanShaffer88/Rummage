@@ -154,6 +154,14 @@ custom price source, `tsm>` search), Pawn (upgrade arrow and %,
 `pawn>` search), Can I Mog It? (transmog status), Scrap (junk
 list), Syndicator (tooltip counts step aside).
 
+## New in 1.14.0
+
+**Controller navigation**: with a gamepad enabled, the D-pad moves through the list
+(left/right change category, or move in the grid), shoulders page, A uses the item,
+X cycles the favorite marker, Y marks junk, B clears the selection or closes the window.
+The selected item's tooltip follows. Setting: *Controller navigation in the list*.
+Not yet checked in game.
+
 ## New in 1.9.1
 
 Bank and Guild Bank open right beside Bags with its height and scale (setting:

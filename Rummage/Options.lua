@@ -205,6 +205,9 @@ builders.general = function(p)
 		"Bags, Bank and other characters each keep their own size and scale.")
 	st:Check("Keyboard navigation in the list", "keyboardNav",
 		"Arrows / Page / Home / End select, Enter uses, Space cycles the favorite marker. Off while typing in search or in combat.")
+	st:Check("Controller navigation in the list", "gamepadNav",
+		"With a controller enabled: D-pad up/down select (left/right change category, or move in the grid), shoulders page, A uses, X cycles the favorite marker, Y marks junk, B clears the selection or closes. Off while typing in search or in combat.",
+		function() R:EachUI(function(w) if w.SyncGamepad then w.SyncGamepad() end end); R:RequestRefresh() end)
 	return st
 end
 

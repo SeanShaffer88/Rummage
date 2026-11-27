@@ -2968,3 +2968,81 @@ test("forecast visible snapshots invalidate on keep rule protection or selection
  R.Planning:Run(); assert(R.Planning.result)
  R.settings.protectFavorites = not R.settings.protectFavorites; R:RequestRefresh(); assert(not R.Planning.result)
 end)
+
+test("controller navigation: D-pad, A/B/X/Y and shoulders; off without a controller, in search or combat", function()
+  local env, R = boot(function(e)
+    e.__pad = true
+    e.C_GamePad = { IsEnabled = function() return e.__pad end }
+  end)
+  env.__addItem(0, 1, 210, 1, { name = "A", quality = 1 })
+  env.__addItem(0, 2, 211, 1, { name = "B", quality = 1 })
+  env.__addItem(0, 3, 212, 1, { name = "C", quality = 1 })
+  R.Data:ScanInventory()
+  open(env, R)
+  local UI, f = R.UI, R.UI.frame
+  assert(f.gamepad == true, "controller buttons captured while shown")
+  local press = f.scripts.OnGamePadButtonDown
+  assert(press, "OnGamePadButtonDown set")
+  press(f, "PADDDOWN")
+  assert(UI.selected == UI:NavEntries()[1], "D-pad down selects")
+  assert(f.propagate == false, "consumed")
+  assert(env.GameTooltip:IsShown(), "tooltip follows the selection")
+  UI.list:SetHeight(400)  -- the stub doesn't resolve anchors: give the list a height
+  press(f, "PADRSHOULDER")
+  assert(UI.selected == UI:NavEntries()[3], "shoulder pages (clamped at the end)")
+  press(f, "PADLSHOULDER")
+  assert(UI.selected == UI:NavEntries()[1], "left shoulder pages back")
+  press(f, "PADDDOWN"); press(f, "PADDDOWN")
+  press(f, "PAD1")
+  assert(env.__used and #env.__used == 1, "A uses the item")
+  local favBefore = R.db.favorites[UI.selected.id]
+  press(f, "PAD3")
+  assert(R.db.favorites[UI.selected.id] ~= favBefore, "X cycles favorite")
+  local junkBefore = R.Junk:IsJunk(UI.selected)
+  press(f, "PAD4")
+  assert(R.Junk:IsJunk(UI.selected) ~= junkBefore, "Y toggles junk")
+  -- left/right change category in the list view
+  local cat = UI.category
+  press(f, "PADDRIGHT"); env.__settle(2)
+  assert(UI.category ~= cat, "right goes to the next category")
+  press(f, "PADDLEFT"); env.__settle(2)
+  assert(UI.category == cat, "left comes back")
+  -- unhandled buttons pass through to the game
+  press(f, "PADLSTICK")
+  assert(f.propagate == true, "unmapped button propagates")
+  -- search focus, combat and no controller all yield
+  UI.searchBox:SetFocus()
+  assert(UI:HandlePadButton("PADDDOWN") == false); UI.searchBox:ClearFocus()
+  env.__combat = true; assert(UI:HandlePadButton("PADDDOWN") == false); env.__combat = false
+  env.__pad = false; assert(UI:HandlePadButton("PADDDOWN") == false); env.__pad = true
+  R.settings.gamepadNav = false; assert(UI:HandlePadButton("PADDDOWN") == false); R.settings.gamepadNav = true
+  -- B clears the selection, then closes
+  UI:HandlePadButton("PADDDOWN")
+  press(f, "PAD2")
+  assert(UI.selected == nil and f:IsShown(), "B clears first")
+  press(f, "PAD2")
+  assert(not f:IsShown() and f.gamepad == false, "B closes and releases the controller")
+  -- combat releases capture
+  open(env, R)
+  env.__ev("PLAYER_REGEN_DISABLED")
+  assert(f.gamepad == false, "released in combat")
+  assert(not env.__errors, "errors: " .. tostring(env.__errors and env.__errors[1]))
+end)
+
+test("controller input goes to the window used last; grid D-pad moves by one", function()
+  local env, R = boot(function(e) e.C_GamePad = { IsEnabled = function() return true end } end)
+  env.__addItem(0, 1, 220, 1, { name = "A" }); env.__addItem(0, 2, 221, 1, { name = "B" })
+  R.Data:ScanInventory()
+  open(env, R)
+  env.SlashCmdList.RUMMAGE("bank"); env.__settle(4)
+  assert(R.gamepadUI == R.BankUI, "last shown window")
+  assert(R.UI:HandlePadButton("PADDDOWN") == false, "Bags yields to the Bank window")
+  R.UI.frame.scripts.OnMouseDown(R.UI.frame)
+  assert(R.gamepadUI == R.UI, "click marks Bags")
+  assert(R.UI:HandlePadButton("PADDDOWN") == true, "clicking Bags takes the controller")
+  R.settings.viewMode = "grid"; R:RequestRefresh(); env.__settle(4)
+  local list = R.UI:NavEntries()
+  R.UI:SelectEntry(list[1])
+  R.UI:HandlePadButton("PADDRIGHT")
+  assert(R.UI.selected == list[2], "grid right moves by one")
+end)

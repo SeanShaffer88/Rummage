@@ -59,7 +59,8 @@ function UI:HandleNavKey(key)
 	if not s.keyboardNav or InCombatLockdown() then return false end
 	if self.searchBox and self.searchBox:HasFocus() then return false end
 	-- Several windows can be open (Bags, Bank, Guild Bank): keys go to the one under the mouse.
-	if self.frame.IsMouseOver and not self.frame:IsMouseOver() then
+	-- (Controller input picks its window itself, see UI_Gamepad.lua.)
+	if not self.padInput and self.frame.IsMouseOver and not self.frame:IsMouseOver() then
 		for _, other in ipairs(R.UIList) do
 			if other ~= self and other.frame and other.frame:IsShown() then return false end
 		end

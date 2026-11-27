@@ -123,6 +123,7 @@ function WOWSTUB(opts)
     function m.ClearFocus(self) self.__focus = false end
     function m.EnableKeyboard(self, v) self.keyboard = v and true or false end
     function m.SetPropagateKeyboardInput(self, v) self.propagate = v end
+    function m.EnableGamePadButton(self, v) self.gamepad = v and true or false end
     function m.SetBackdrop(self, b) self.backdrop = b end
     function m.GetNormalTexture(self) self.__nt = self.__nt or newObject("Texture", nil, self); return self.__nt end
     function m.GetPushedTexture(self) self.__pt = self.__pt or newObject("Texture", nil, self); return self.__pt end

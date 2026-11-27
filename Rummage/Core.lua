@@ -413,6 +413,7 @@ R.defaults = {
 	perViewSize = false,    -- remember window size + scale separately for Bags / Bank / All characters
 	viewSizes = {},         -- [bags|bank|all] = { w, h, scale }
 	keyboardNav = true,     -- arrows / Enter / Space in the list while the search box is not focused
+	gamepadNav = true,      -- 1.14.0: controller D-pad / A / B / X / Y / shoulders in the list
 	colorblindCues = false, -- quality shown with a text tag as well as colour
 	staleDays = 14,         -- cached characters not seen for this long are dimmed; 0 = off
 	sellConfirmValue = 0,   -- copper; selling junk worth more than this asks first (0 = off)
