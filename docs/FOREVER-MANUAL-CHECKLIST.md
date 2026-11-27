@@ -1,5 +1,7 @@
 # Forever Followup Manual Checklist
 
+For the full prioritized in-game list (1.9.0 to 1.14.0, including controller navigation), see `docs/IN-GAME-CHECKLIST.md`; this file keeps the detailed buyback, bank, mail and trade cases.
+
 User requested offline tests only for 1.12.1. Every live result below is **Unperformed**; the offline suites do not qualify server acknowledgement, taint, secure templates, accessibility or real performance. Previous 1.12.0 observations remain historical evidence and were not repeated for this followup.
 
 Before a future authorized run, record the exact values of `GetBuildInfo()` (version, build, date, Interface), addon TOC Version/X-Build, `/rum apicheck export` output, enabled integrations, UI scale, font size, bag/bank layout and character/session context. Current declared target: Forever 1.60.1.71037, Interface 16001. Back up owned SavedVariables and restore any temporary test settings or inventory afterward.

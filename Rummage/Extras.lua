@@ -47,6 +47,9 @@ local CHECKS = {
 	-- 1.11.0 random companion utilities
 	{ "C_PetJournal.SummonRandomPet", false, function() return C_PetJournal and C_PetJournal.SummonRandomPet end },
 	{ "C_MountJournal.SummonByID", false, function() return C_MountJournal and C_MountJournal.SummonByID end },
+	-- 1.14.0 controller navigation
+	{ "C_GamePad.IsEnabled", false, function() return C_GamePad and C_GamePad.IsEnabled end },
+	{ "Frame:EnableGamePadButton", false, function() local f = UIParent; return f and f.EnableGamePadButton end },
 }
 
 -- Returns the result list and the count of missing REQUIRED entries.

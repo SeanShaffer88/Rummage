@@ -81,7 +81,7 @@ lines (split into `UI_Rows.lua`, `UI_Sidebar.lua`, `UI_Footer.lua`).
 | Idea | From | Why not now |
 |---|---|---|
 | Guild bank view (live + cached) | Baganator, Bagnon, Sorted, ArkInventory | **Added in 1.9.0** (Guild Bank window); must be checked in game. |
-| Gamepad navigation | Baganator (Forever) | Forever ships gamepad support; builds on the 1.5.0 keyboard nav, but needs a controller to test. |
+| Gamepad navigation | Baganator (Forever) | **Added in 1.14.0**; needs a controller to check in game. |
 | Drag an item onto a sidebar category to file it there | BetterBags, AdiBags, ArkInventory | **Added in 1.10.0.** |
 | Ignore chosen slots in sort | Baganator, ArkInventory | Only matters for the Blizzard sort button; Rummage's list is always sorted. |
 | Configurable icon-corner badges in grid view | Baganator | Cosmetic; grid view is secondary to the list. |

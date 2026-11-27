@@ -33,7 +33,7 @@ R:RegisterEventOnce("PLAYER_LOGIN", function()
 	R.Tooltip:Init()
 	R.Upgrade:Init()
 	R.UI:RegisterPopups()
-	for _, w in ipairs(R.UIList) do w:Create(); w:SetupKeyboard() end
+	for _, w in ipairs(R.UIList) do w:Create(); w:SetupKeyboard(); w:SetupGamepad() end
 	R.Extras:Init()
 	R.Hooks:Init()
 	R.Options:Init()

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.14.0 — 2026-11-27
+
+**Added**
+- **Controller navigation** (setting *Controller navigation in the list*, General, on by default; only active with a controller enabled). D-pad up/down move the selection; left/right change category in the list view or move by one in the grid; shoulders page; **A** uses the item, **X** cycles the favorite marker, **Y** marks or unmarks junk, **B** clears the selection, then closes the window. The selected item's tooltip follows. Input goes to the window shown or clicked last. Off while typing in search and in combat (capture is released when combat starts); other buttons go to the game.
+- `/rum apicheck` lists `C_GamePad.IsEnabled` and `Frame:EnableGamePadButton`.
+- `docs/IN-GAME-CHECKLIST.md`: a prioritized in-game test list for everything since 1.9.0.
+
+**Verification**
+- 148 offline Lua cases (2 new). Not run in game or with a controller: the `OnGamePadButtonDown` script and button propagation through `SetPropagateKeyboardInput` come from Blizzard's own UI, not the API documentation.
+
 ## 1.13.0 — 2026-11-21
 
 **Added**

@@ -18,6 +18,7 @@ characters, and sell unwanted items with one click.
 - Move items between bags and storage, combine matching piles, or empty a bag.
 - Spot new finds and gear that may be better.
 - Call a random pet or favorite mount.
+- Use a controller: move through items, use them and mark them with the gamepad.
 
 ## Screenshots
 
